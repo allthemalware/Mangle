@@ -1,22 +1,22 @@
 //! Mangle CLAP shell (nih-plug).
 //!
-//! Step-5 state: the 32-slot mod matrix runs. Per block: decode rows once,
-//! apply the **global pass** (destinations on the six global LFOs) using
-//! last-tick source values, tick the global sources (LFOs, Drift, Noise,
-//! env follower), then per voice apply the **voice pass per channel** —
-//! the matrix modulates L and R independently, so each grain engine gets
-//! two parameter sets and its emitters diverge (Torsion stereo modulation).
-//! Loop Position lands as a window shift, Loop LFO feedback uses one-block
-//! delay, Macros (with per-note offsets) feed the matrix, and pressure
-//! events drive the Pressure source.
+//! Per block: snapshot host params into the base patch, decode the 32-slot
+//! matrix once, then run a ~64-sample control-chunk loop. Each chunk applies
+//! the **global pass** (destinations on the six global LFOs) from last-tick
+//! source values, ticks the global sources (LFOs, Drift, Noise, env follower),
+//! then per voice applies the **voice pass per channel** so L and R diverge
+//! (Torsion stereo modulation) — each grain engine gets two parameter sets and
+//! renders in its selected mode (Grains / Stretch / Cloud / Spectral). Loop
+//! Position lands as a window shift, Loop LFO feedback uses a one-block delay,
+//! Macros (with per-note offsets) feed the matrix, and the pressure / tuning
+//! note expressions drive the Pressure source and the pitch path. Output chain:
+//! stereo width → Squeeze → master level → env-follower feed.
 //!
-//! Known simplifications, flagged inline: control rate = host block;
-//! per-channel modulation of an LFO's *rate* resolves from the left
-//! channel (stereo LFOs still split via St.Phase); note-expression tuning
-//! not yet wired.
+//! Remaining simplification: per-channel modulation of an LFO's *rate* resolves
+//! from the left channel (stereo LFOs still split via St.Phase).
 //!
-//! NOTE: this crate is not compiled in the sandbox (nih-plug is a git
-//! dependency); `API:` comments mark the likely friction points.
+//! `API:` comments mark the nih-plug call sites most likely to need an
+//! API-drift fix against a given checkout (see BUILD_NOTES.md).
 
 use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;

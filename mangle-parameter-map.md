@@ -114,9 +114,8 @@ grain's read **start** and **increment** are chosen.
 *Why reinterpret instead of adding params:* this is the Plaits move — a fixed
 control set whose meaning shifts per engine — and it keeps the mod matrix,
 state format, and ID scheme unchanged (Mode is a normal stepped param). The
-GUI should relabel the affected cells per mode (Direction→"Scrub" in Stretch,
-Jitter→"Spray" in Cloud; in Spectral, Direction→"Time", Shape→"Formant",
-Skew→"Blur").
+editor relabels each affected cell per mode: Direction→SCRUB in Stretch,
+Jitter→SPRAY in Cloud; in Spectral, Direction→TIME, Shape→FORMANT, Skew→BLUR.
 
 **Spectral implementation notes** (`crate::spectral`, `crate::fft`):
 

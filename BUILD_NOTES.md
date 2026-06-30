@@ -1,10 +1,16 @@
 # Mangle — build notes (read before first `cargo build`)
 
 The `mangle-dsp` and `mangle-loader` crates are compiled and unit-tested
-(`cargo test -p mangle-dsp` → 75 pass; the loader's 10 pass). The `mangle`
-plugin crate now **compiles and loads** against egui 0.31.1 / current
-nih-plug (confirmed by alpha testing). The notes below are retained as a
-reference for the API-drift points that were resolved.
+(`cargo test -p mangle-dsp` → 94 pass; the loader's 10 pass). The `mangle`
+plugin crate **compiles and loads** against egui 0.31.1 / current nih-plug.
+The notes below are retained as a reference for the API-drift points that
+were resolved.
+
+**Not yet host-audited:** the selectable engine modes and the Spectral phase
+vocoder landed after the original alpha test — they pass the unit tests but
+have not been played through a live host. Audition them in Bitwig (listen for
+artifacts, watch CPU at polyphony, confirm `assert_process_allocs` never trips)
+before relying on them.
 
 Expect the first `cargo build` to surface real signature mismatches. This
 file is the map. None of these are logic bugs — they're API-drift fixes
@@ -63,7 +69,7 @@ these first:
 - **`unsafe impl Params`** — the manual `param_map()` returns
   `Vec<(String, ParamPtr, String)>`. Confirm the tuple shape and that
   `ParamPtr` / `.as_ptr()` still match; this is the one place we bypass
-  the `#[derive(Params)]` macro to generate 377 params from the table.
+  the `#[derive(Params)]` macro to generate 380 params from the table.
 - **`with_poly_modulation_id` / `PolyModulationConfig`** — poly-mod opt-in.
   Confirm the const name `CLAP_POLY_MODULATION_CONFIG`.
 - **`NoteEvent` arms** — `PolyModulation`, `MonoAutomation`, `PolyTuning`,
@@ -85,7 +91,7 @@ these first:
   `ParamTable` / `ExtraState` types are shared and compile).
 
 ## First-run sanity (once it builds)
-1. Load in Bitwig; confirm 377 params appear in the generic editor.
+1. Load in Bitwig; confirm 380 params appear in the generic editor.
 2. Hold a note — you should hear the built-in fallback tone (no sample
    loaded). If silent, check the `process()` output split and `g.level`.
 3. Launch with `MANGLE_SAMPLE=/path/to/a.wav` — slot 1 should show a

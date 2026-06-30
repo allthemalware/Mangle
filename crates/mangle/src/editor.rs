@@ -14,8 +14,8 @@
 //! * waveform: drag loop edges, drag the region body to move it
 //! * CURVES swaps to the curve editor (freehand draw + presets + ops)
 //!
-//! NOTE: not compiled in the sandbox. `API:` comments mark the spots most
-//! likely to need a touch-up against the vendored egui / nih_plug_egui.
+//! `API:` comments mark the egui / nih_plug_egui call sites most likely to
+//! need a touch-up against a given checkout (see BUILD_NOTES.md).
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};

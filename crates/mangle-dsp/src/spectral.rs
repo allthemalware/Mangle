@@ -567,6 +567,8 @@ fn generate(
 /// phase offset from the peak. This re-locks the bins of each partial together,
 /// removing most of the phase-vocoder "phasiness" during stretch and freeze.
 /// `peak_prev`/`peak_next` are pre-allocated scratch (nearest peak ≤ / ≥ bin).
+// Index-based: the peak scan and region assignment walk parallel arrays by index.
+#[allow(clippy::needless_range_loop)]
 fn lock_phases(
     mag: &[f32],
     ana_phase: &[f32],

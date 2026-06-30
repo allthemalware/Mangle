@@ -14,9 +14,9 @@ Design source of truth: [`mangle-parameter-map.md`](mangle-parameter-map.md)
 
 Build-order steps 1–7 and 9 present, plus the tested cores of steps 8 and 10.
 The `mangle` plugin crate compiles and loads (see `BUILD_NOTES.md`); the
-DSP core is the fully validated part — `cargo test -p mangle-dsp` (88 tests).
+DSP core is the fully validated part — `cargo test -p mangle-dsp` (94 tests).
 
-- `mangle-dsp` — dependency-free core: stable 377-entry parameter table,
+- `mangle-dsp` — dependency-free core: stable 380-entry parameter table,
   value mappings, the full grain engine (snapshot rule, COLA-gapless linked
   length, per-engine read/stretch **Algo**: Nearest / Linear / Hermite /
   Sinc-8, **per-channel parameter sets** so the L/R emitters diverge under
@@ -30,8 +30,10 @@ DSP core is the fully validated part — `cargo test -p mangle-dsp` (88 tests).
   hex codec for the host field store), the RANDOM engine with per-unit
   locks, and **selectable per-engine modes** — Grains / Stretch (time-stretch +
   scrub) / Cloud (diffuse smear) / Spectral (a streaming phase vocoder over an
-  in-crate FFT, with spectral freeze). 88 unit tests (`cargo test -p mangle-dsp`).
-- `mangle` — nih-plug CLAP shell with the **full 377-parameter set
+  in-crate FFT: spectral freeze, formant-preserving pitch shift, blur, identity
+  phase locking, and a zero-latency primed onset). 94 unit tests
+  (`cargo test -p mangle-dsp`).
+- `mangle` — nih-plug CLAP shell with the **full 380-parameter set
   generated from the table** (manual `Params` impl, no derive): continuous
   params normalized with table-driven display formatting, stepped params
   with proper names (divisions, matrix sources/dests, algorithms, note
