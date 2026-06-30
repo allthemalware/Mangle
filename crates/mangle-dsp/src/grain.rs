@@ -33,23 +33,44 @@ pub struct GrainSnapshot {
     pub channel: u8,
 }
 
-/// Amplitude envelope. `t` is normalized grain time 0..1.
-///
-/// Skew warps time so the peak lands early (skew −1, pluck) or late
-/// (skew +1, reverse swell); Shape morphs a raised cosine toward a
-/// rectangle by flattening the window's power.
-pub fn grain_envelope(t: f32, shape: f32, skew: f32) -> f32 {
+/// Per-grain envelope coefficients, derived once from the (frozen) Shape/Skew
+/// snapshot: the warp `peak` (from Skew) and the power `exponent` (from Shape).
+/// Computing these once per grain instead of per sample — and the `>= 1.0`
+/// exponent check in `grain_envelope_at` skipping `powf` when Shape is 0 (the
+/// default) — keeps the render hot path cheap.
+#[inline]
+pub fn grain_env_coeffs(shape: f32, skew: f32) -> (f32, f32) {
+    let peak = (0.5 + 0.499 * skew.clamp(-1.0, 1.0)).clamp(0.001, 0.999);
+    let exponent = 1.0 - 0.999 * shape.clamp(0.0, 1.0);
+    (peak, exponent)
+}
+
+/// Amplitude envelope at normalized grain time `t` from precomputed
+/// coefficients (see `grain_env_coeffs`). Skew warps time so the peak lands
+/// early (pluck) or late (reverse swell); Shape morphs a raised cosine toward
+/// a rectangle by flattening the window's power.
+#[inline]
+pub fn grain_envelope_at(t: f32, peak: f32, exponent: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
-    let skew = skew.clamp(-1.0, 1.0);
-    let peak = (0.5 + 0.499 * skew).clamp(0.001, 0.999);
     let warped = if t < peak {
         0.5 * t / peak
     } else {
         0.5 + 0.5 * (t - peak) / (1.0 - peak)
     };
     let cos_win = 0.5 - 0.5 * (core::f32::consts::TAU * warped).cos();
-    let p = shape.clamp(0.0, 1.0);
-    cos_win.powf(1.0 - 0.999 * p)
+    if exponent >= 1.0 {
+        cos_win // Shape 0 (default): the raised cosine itself, no powf
+    } else {
+        cos_win.powf(exponent)
+    }
+}
+
+/// Amplitude envelope from raw Shape/Skew. `t` is normalized grain time 0..1.
+/// Convenience wrapper over `grain_env_coeffs` + `grain_envelope_at` for tests
+/// and non-hot-path callers.
+pub fn grain_envelope(t: f32, shape: f32, skew: f32) -> f32 {
+    let (peak, exponent) = grain_env_coeffs(shape, skew);
+    grain_envelope_at(t, peak, exponent)
 }
 
 /// Per-engine, per-channel emission clock. Counts down in samples; Jitter
@@ -131,6 +152,27 @@ mod tests {
         assert!(argmax(-1.0) < 0.05, "pluck peak too late");
         assert!(argmax(1.0) > 0.95, "reverse peak too early");
         assert!((argmax(0.0) - 0.5).abs() < 0.05);
+    }
+
+    #[test]
+    fn envelope_matches_reference_formula() {
+        // The hoisted coeffs + powf-skip must reproduce the original closed form.
+        for shape in [0.0f32, 0.25, 1.0] {
+            for skew in [-0.7f32, 0.0, 0.6] {
+                for i in 0..=20 {
+                    let t = i as f32 / 20.0;
+                    let pk = (0.5 + 0.499 * skew).clamp(0.001, 0.999);
+                    let w = if t < pk { 0.5 * t / pk } else { 0.5 + 0.5 * (t - pk) / (1.0 - pk) };
+                    let cw = 0.5 - 0.5 * (core::f32::consts::TAU * w).cos();
+                    let reference = cw.powf(1.0 - 0.999 * shape);
+                    let got = grain_envelope(t, shape, skew);
+                    assert!(
+                        (got - reference).abs() < 1e-4,
+                        "env mismatch t={t} shape={shape} skew={skew}: {got} vs {reference}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

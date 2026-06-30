@@ -9,7 +9,7 @@
 //! Allocation-free in steady state: the grain pool and the emission
 //! scratch buffer are pre-sized; overflow steals the oldest grain.
 
-use crate::grain::{grain_envelope, Emitter, GrainSnapshot};
+use crate::grain::{grain_env_coeffs, grain_envelope_at, Emitter, GrainSnapshot};
 use crate::rng::Rng;
 use crate::sample::{read, Algo, SampleBank};
 use crate::spectral::SpectralState;
@@ -325,6 +325,9 @@ impl Lane {
             let data = &slot.data[g.snap.channel as usize];
             let own_gain = (g.snap.pan * core::f32::consts::FRAC_PI_2).cos();
             let swap_gain = (g.snap.pan * core::f32::consts::FRAC_PI_2).sin();
+            // Shape/Skew are frozen per grain — derive the envelope coefficients
+            // once here, not per sample.
+            let (peak, exponent) = grain_env_coeffs(g.snap.shape, g.snap.skew);
             let mut n = 0usize;
             if g.delay as usize >= block {
                 g.delay -= block as u32;
@@ -334,7 +337,7 @@ impl Lane {
             g.delay = 0;
             while n < block && g.age < g.snap.length {
                 let t = g.age as f32 / g.snap.length as f32;
-                let env = grain_envelope(t, g.snap.shape, g.snap.skew);
+                let env = grain_envelope_at(t, peak, exponent);
                 let s = read(data, g.pos, g.snap.wstart, g.snap.wlen, g.snap.algo)
                     * env
                     * g.snap.level;
