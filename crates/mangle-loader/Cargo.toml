@@ -1,0 +1,14 @@
+[package]
+name = "mangle-loader"
+version = "0.1.0"
+edition = "2021"
+description = "Mangle sample loading: decode (symphonia), resample (windowed sinc), hash (BLAKE3)."
+
+[dependencies]
+mangle-dsp = { path = "../mangle-dsp" }
+symphonia = { version = "0.5", default-features = false, features = [
+    "wav", "pcm", "flac", "ogg", "vorbis", "mp3", "aiff", "adpcm",
+] }
+# Pinned so older toolchains can still resolve (cpufeatures 0.3 in newer
+# blake3 releases requires edition2024 / cargo 1.85+). Safe to bump.
+blake3 = "=1.5.5"

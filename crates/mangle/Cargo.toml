@@ -1,0 +1,19 @@
+[package]
+name = "mangle"
+version = "0.1.0"
+edition = "2021"
+description = "Mangle - granular texture instrument (CLAP)"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+mangle-dsp = { path = "../mangle-dsp" }
+mangle-loader = { path = "../mangle-loader" }
+# VST3 (GPLv3-licensed vst3-sys) deliberately disabled; re-enable with the
+# "vst3" feature if you ever want a VST3 build and accept the license.
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default-features = false, features = ["assert_process_allocs"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+# Native file picker for per-slot sample loading. xdg-portal default avoids
+# a hard GTK dependency on Linux; falls back to the platform-native dialog.
+rfd = "0.15"
