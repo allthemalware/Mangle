@@ -6,9 +6,9 @@ plugin crate **compiles and loads** against egui 0.31.1 / current nih-plug.
 The notes below are retained as a reference for the API-drift points that
 were resolved.
 
-**Not yet host-audited:** the selectable engine modes and the Spectral phase
-vocoder landed after the original alpha test — they pass the unit tests but
-have not been played through a live host. Audition them in Bitwig (listen for
+**Not yet host-audited:** the selectable engine modes, the Spectral phase
+vocoder, and sample-accurate event timing landed after the original alpha
+test — they pass the unit tests but have not been played through a live host. Audition them in Bitwig (listen for
 artifacts, watch CPU at polyphony, confirm `assert_process_allocs` never trips)
 before relying on them.
 

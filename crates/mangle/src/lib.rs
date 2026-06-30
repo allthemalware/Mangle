@@ -1,7 +1,8 @@
 //! Mangle CLAP shell (nih-plug).
 //!
 //! Per block: snapshot host params into the base patch, decode the 32-slot
-//! matrix once, then run a ~64-sample control-chunk loop. Each chunk applies
+//! matrix once, then run a control-chunk loop (≤64 samples, split at note-event
+//! timings so note onsets are sample-accurate). Each chunk applies
 //! the **global pass** (destinations on the six global LFOs) from last-tick
 //! source values, ticks the global sources (LFOs, Drift, Noise, env follower),
 //! then per voice applies the **voice pass per channel** so L and R diverge
@@ -403,6 +404,87 @@ impl Mangle {
             self.mono_overrides.push((id, value));
         }
     }
+
+    /// Apply one note/automation event. Called from the control-chunk loop at
+    /// the event's sample offset so note timing is sample-accurate. `gate_sync`
+    /// is the per-engine Gate-Sync flag set (resolved once from the base patch).
+    fn apply_event(&mut self, event: NoteEvent<()>, gate_sync: &[bool; 3]) {
+        match event {
+            NoteEvent::NoteOn { note, velocity, voice_id, channel, .. } => {
+                let vr = self.rng.bipolar();
+                let v = self.vm.note_on(note, voice_id.unwrap_or(-1), channel, velocity, vr);
+                for (e, gs) in gate_sync.iter().enumerate() {
+                    if *gs {
+                        v.loop_lfos[e].trig();
+                    }
+                }
+            }
+            NoteEvent::NoteOff { note, voice_id, .. } => {
+                self.vm.note_off(note, voice_id.unwrap_or(-1));
+            }
+            NoteEvent::Choke { voice_id, note, .. } => {
+                for v in self.vm.voices.iter_mut() {
+                    let hit = match voice_id {
+                        Some(id) => v.note_id == id,
+                        None => v.note == note,
+                    };
+                    if hit {
+                        v.gate = false;
+                        for lane in v.lanes.iter_mut() {
+                            lane.reset();
+                        }
+                    }
+                }
+            }
+            NoteEvent::PolyPressure { voice_id, note, pressure, .. } => {
+                for v in self.vm.voices.iter_mut() {
+                    let hit = match voice_id {
+                        Some(id) => v.note_id == id,
+                        None => v.note == note,
+                    };
+                    if hit {
+                        v.pressure = pressure;
+                    }
+                }
+            }
+            NoteEvent::MidiChannelPressure { pressure, .. } => {
+                for v in self.vm.voices.iter_mut() {
+                    if v.gate {
+                        v.pressure = pressure;
+                    }
+                }
+            }
+            NoteEvent::PolyTuning { voice_id, note, tuning, .. } => {
+                for v in self.vm.voices.iter_mut() {
+                    let hit = match voice_id {
+                        Some(id) => v.note_id == id,
+                        None => v.note == note,
+                    };
+                    if hit {
+                        v.tuning = tuning;
+                    }
+                }
+            }
+            NoteEvent::PolyModulation { voice_id, poly_modulation_id, normalized_offset, .. } => {
+                if let Some(v) = self.vm.voices.iter_mut().find(|v| v.note_id == voice_id) {
+                    v.set_mod_offset(poly_modulation_id, normalized_offset);
+                }
+            }
+            NoteEvent::MonoAutomation { poly_modulation_id, normalized_value, .. } => {
+                self.set_mono_override(poly_modulation_id, normalized_value);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Sample-accurate block splitting: end (exclusive) of the control segment that
+/// starts at `off`, bounded by the next event's sample offset, the control-chunk
+/// size, and the block end. Assumes events at or before `off` have already been
+/// drained, so the result is always `> off` while `off < block` (forward
+/// progress, no zero-length segments).
+fn segment_end(off: usize, next_event: Option<usize>, block: usize, chunk: usize) -> usize {
+    next_event.unwrap_or(block).min(off + chunk).min(block)
 }
 
 impl Plugin for Mangle {
@@ -607,77 +689,9 @@ impl Plugin for Mangle {
             *gs = self.base.values[pos] >= 0.5;
         }
 
-        // 4. Events. Block-quantized for now.
-        while let Some(event) = context.next_event() {
-            match event {
-                NoteEvent::NoteOn { note, velocity, voice_id, channel, .. } => {
-                    let vr = self.rng.bipolar();
-                    let v = self.vm.note_on(note, voice_id.unwrap_or(-1), channel, velocity, vr);
-                    for (e, gs) in gate_sync.iter().enumerate() {
-                        if *gs {
-                            v.loop_lfos[e].trig();
-                        }
-                    }
-                }
-                NoteEvent::NoteOff { note, voice_id, .. } => {
-                    self.vm.note_off(note, voice_id.unwrap_or(-1));
-                }
-                NoteEvent::Choke { voice_id, note, .. } => {
-                    for v in self.vm.voices.iter_mut() {
-                        let hit = match voice_id {
-                            Some(id) => v.note_id == id,
-                            None => v.note == note,
-                        };
-                        if hit {
-                            v.gate = false;
-                            for lane in v.lanes.iter_mut() {
-                                lane.reset();
-                            }
-                        }
-                    }
-                }
-                NoteEvent::PolyPressure { voice_id, note, pressure, .. } => {
-                    for v in self.vm.voices.iter_mut() {
-                        let hit = match voice_id {
-                            Some(id) => v.note_id == id,
-                            None => v.note == note,
-                        };
-                        if hit {
-                            v.pressure = pressure;
-                        }
-                    }
-                }
-                NoteEvent::MidiChannelPressure { pressure, .. } => {
-                    for v in self.vm.voices.iter_mut() {
-                        if v.gate {
-                            v.pressure = pressure;
-                        }
-                    }
-                }
-                NoteEvent::PolyTuning { voice_id, note, tuning, .. } => {
-                    for v in self.vm.voices.iter_mut() {
-                        let hit = match voice_id {
-                            Some(id) => v.note_id == id,
-                            None => v.note == note,
-                        };
-                        if hit {
-                            v.tuning = tuning;
-                        }
-                    }
-                }
-                NoteEvent::PolyModulation { voice_id, poly_modulation_id, normalized_offset, .. } => {
-                    if let Some(v) =
-                        self.vm.voices.iter_mut().find(|v| v.note_id == voice_id)
-                    {
-                        v.set_mod_offset(poly_modulation_id, normalized_offset);
-                    }
-                }
-                NoteEvent::MonoAutomation { poly_modulation_id, normalized_value, .. } => {
-                    self.set_mono_override(poly_modulation_id, normalized_value);
-                }
-                _ => {}
-            }
-        }
+        // 4. Events are applied inside the control-chunk loop (step 7) at their
+        //    sample offsets, via `apply_event` — so note timing is sample-
+        //    accurate rather than quantized to the block. `gate_sync` feeds it.
 
         // 5. Globals + per-slot settings (from the base patch — the Global
         //    and Slot modules are not matrix destinations).
@@ -708,10 +722,26 @@ impl Plugin for Mangle {
         //    fast Loop LFO now scans *within* a host block instead of
         //    jumping once per block.
         const CTRL_CHUNK: usize = 64;
-        let rows = &self.rows[..self.n_rows];
+        // Stack-copy the decoded rows so the loop body can take &mut self (for
+        // sample-accurate event handling) without conflicting with a borrow on
+        // self.rows. DecodedRow is Copy — see mangle-borrow-fallback.md.
+        let rows_buf = self.rows;
+        let rows = &rows_buf[..self.n_rows];
         let mut off = 0usize;
+        let mut next_event = context.next_event();
         while off < block {
-            let n = (block - off).min(CTRL_CHUNK);
+            // Apply every event due at or before this sample, then bound the
+            // segment by the next event so its onset lands on the exact sample.
+            while let Some(ev) = next_event {
+                if (ev.timing() as usize) > off {
+                    break;
+                }
+                self.apply_event(ev, &gate_sync);
+                next_event = context.next_event();
+            }
+            let seg_end =
+                segment_end(off, next_event.map(|e| e.timing() as usize), block, CTRL_CHUNK);
+            let n = seg_end - off;
             let dt = n as f32 / self.sample_rate;
             let t_sec = if playing {
                 pos_sec0.map(|s| s + off as f64 / self.sample_rate as f64)
@@ -827,6 +857,12 @@ impl Plugin for Mangle {
             }
             off += n;
         }
+        // Apply any events at/after the final sample so none are dropped (their
+        // state carries into the next block).
+        while let Some(ev) = next_event {
+            self.apply_event(ev, &gate_sync);
+            next_event = context.next_event();
+        }
 
         // 8. Voice termination (lets the host recycle CLAP note ids).
         for voice in self.vm.voices.iter_mut() {
@@ -884,3 +920,53 @@ impl ClapPlugin for Mangle {
 }
 
 nih_export_clap!(Mangle);
+
+#[cfg(test)]
+mod tests {
+    use super::segment_end;
+
+    #[test]
+    fn segment_end_caps_and_breaks() {
+        assert_eq!(segment_end(0, None, 512, 64), 64); // chunk cap
+        assert_eq!(segment_end(500, None, 512, 64), 512); // block cap
+        assert_eq!(segment_end(0, Some(40), 512, 64), 40); // break at next event
+        assert_eq!(segment_end(0, Some(100), 512, 64), 64); // chunk before event
+        assert_eq!(segment_end(60, Some(1000), 512, 64), 124); // event past block
+        assert_eq!(segment_end(511, None, 512, 64), 512); // progress at last sample
+    }
+
+    #[test]
+    fn segments_tile_block_and_break_on_events() {
+        // Mirror the control-chunk loop's drain + split with these event timings
+        // (sorted, duplicates allowed) and verify the resulting segmentation.
+        let (block, chunk) = (200usize, 64usize);
+        let events = [0usize, 10, 10, 75, 199];
+        let (mut ev, mut off) = (0usize, 0usize);
+        let mut applied = Vec::new();
+        let mut segs: Vec<(usize, usize)> = Vec::new();
+        while off < block {
+            while ev < events.len() && events[ev] <= off {
+                applied.push(events[ev]);
+                ev += 1;
+            }
+            let seg_end = segment_end(off, events.get(ev).copied(), block, chunk);
+            assert!(seg_end > off, "no progress at off={off}");
+            assert!(seg_end - off <= chunk, "segment exceeds chunk");
+            segs.push((off, seg_end));
+            off = seg_end;
+        }
+        while ev < events.len() {
+            applied.push(events[ev]);
+            ev += 1;
+        }
+        assert_eq!(applied, vec![0, 10, 10, 75, 199]); // each event once, in order
+        assert_eq!(segs.first().unwrap().0, 0);
+        assert_eq!(segs.last().unwrap().1, block); // tiles [0, block)
+        for w in segs.windows(2) {
+            assert_eq!(w[0].1, w[1].0, "gap/overlap between segments");
+        }
+        for &t in &[10usize, 75, 199] {
+            assert!(segs.iter().any(|&(s, _)| s == t), "event {t} not a segment boundary");
+        }
+    }
+}
