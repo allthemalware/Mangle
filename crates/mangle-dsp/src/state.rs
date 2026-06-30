@@ -16,6 +16,11 @@
 //! u64      last random seed
 //! 6 × slot ref: u8 present; if 1: u32 path len, utf-8 path, u64 hash
 //! ```
+//! The format is **append-only**: the fields above are a fixed prefix in every
+//! version, and later versions only append after them. `deserialize` therefore
+//! upgrades older blobs (missing fields default) and tolerates newer ones
+//! (unknown trailing bytes ignored), so saved patches survive a `VERSION` bump.
+//!
 //! Slot content hashes are BLAKE3 truncated to 8 bytes, produced by the
 //! `mangle-loader` crate. The FNV helper below remains as a dependency-free
 //! utility for tests and non-file hashing.
@@ -200,9 +205,18 @@ pub fn deserialize(data: &[u8]) -> Option<ExtraState> {
         return None;
     }
     let version = r.u16()?;
-    if version != VERSION {
-        return None; // future: migrations
+    if version == 0 {
+        return None; // 0 is never a valid version
     }
+    // Append-only versioned format: the v1 fields below are a fixed prefix in
+    // every version >= 1, and later versions only *append* after them (never
+    // reorder or resize existing fields). So a format bump is non-destructive:
+    //   * newer code reading an older blob keeps defaults for the appended
+    //     fields it doesn't find (the `version >=` gates at the end), and
+    //   * older code reading a newer blob reads the prefix it understands and
+    //     ignores the trailing bytes.
+    // To add state: bump VERSION, append the writes in `serialize`, and append
+    // a matching `if version >= N { … }` read block at the end of this function.
     let mut state = ExtraState::default();
     for c in state.curves.iter_mut() {
         for v in c.0.iter_mut() {
@@ -227,6 +241,11 @@ pub fn deserialize(data: &[u8]) -> Option<ExtraState> {
             }
         };
     }
+    // v2+ appended fields are read here, gated on `version` and defaulting when
+    // absent, e.g.:
+    //   if version >= 2 {
+    //       state.embed_samples = r.u8().map(|b| b != 0).unwrap_or(false);
+    //   }
     Some(state)
 }
 
@@ -302,6 +321,38 @@ mod tests {
         bytes[0] = b'X';
         assert!(deserialize(&bytes).is_none());
         assert!(deserialize(&[]).is_none());
+    }
+
+    #[test]
+    fn loads_newer_version_keeping_the_v1_prefix() {
+        // A hypothetical future v2 blob: a valid v1 payload with the version
+        // bumped to 2 and extra trailing bytes (fields this code can't read).
+        // Every v1 field must still load; the trailing bytes are ignored.
+        let mut st = ExtraState::default();
+        st.curves[3] = Curve::random_walk(9);
+        st.locks.lfo[2] = true;
+        st.random_amount = 0.33;
+        st.last_seed = 0x1234_5678_9ABC_DEF0;
+        st.slot_refs[1] = Some(SlotRef { path: "/x/y.wav".to_string(), content_hash: 99 });
+
+        let mut bytes = serialize(&st);
+        bytes[4] = 2; // version u16 (LE) low byte: 1 -> 2
+        bytes.extend_from_slice(&[0xAA; 16]); // appended "v2" data, unknown to us
+
+        let back = deserialize(&bytes).expect("a newer-version blob must still load");
+        assert_eq!(back.curves[3].0[..], st.curves[3].0[..]);
+        assert_eq!(back.locks, st.locks);
+        assert!((back.random_amount - 0.33).abs() < 1e-6);
+        assert_eq!(back.last_seed, st.last_seed);
+        assert_eq!(back.slot_refs[1], st.slot_refs[1]);
+    }
+
+    #[test]
+    fn rejects_version_zero() {
+        let mut bytes = serialize(&ExtraState::default());
+        bytes[4] = 0;
+        bytes[5] = 0;
+        assert!(deserialize(&bytes).is_none());
     }
 
     #[test]
