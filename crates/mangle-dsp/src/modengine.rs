@@ -264,14 +264,14 @@ impl GlobalMod {
         dt: f32,
         transport_seconds: Option<f64>,
     ) {
-        for i in 0..6 {
+        for (i, curve) in curves.iter().enumerate() {
             let (p, transport) = resolve::lfo_params(patch, table, Module::Lfo, i as u8, bpm);
             self.last_lfo[i] = match (transport, transport_seconds) {
                 (true, Some(sec)) => {
                     let phase = (sec * p.rate_hz as f64).rem_euclid(1.0) as f32;
-                    self.lfos[i].tick_transport(&curves[i], &p, phase, dt)
+                    self.lfos[i].tick_transport(curve, &p, phase, dt)
                 }
-                _ => self.lfos[i].tick(&curves[i], &p, dt),
+                _ => self.lfos[i].tick(curve, &p, dt),
             };
         }
         for d in 0..3 {

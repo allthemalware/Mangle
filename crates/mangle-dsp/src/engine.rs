@@ -247,6 +247,9 @@ impl Lane {
     /// two emitters can run at different rates, pitches, positions…
     /// `scan` is the engine's Loop LFO output per channel, -1..1.
     /// `gate` already folds in engine Gate ∧ global On ∧ note gate.
+    // Eight params is over clippy's default, but each is a distinct, meaningful
+    // input to the render; bundling them into a struct would not aid clarity.
+    #[allow(clippy::too_many_arguments)]
     pub fn process(
         &mut self,
         p: &[LaneParams; 2],

@@ -445,14 +445,12 @@ pub(crate) fn create(params: Arc<MangleParams>) -> Option<Box<dyn Editor>> {
             });
             if !dropped.is_empty() {
                 let start = st.drop_target.unwrap_or(st.selected_slot).min(5);
-                let mut slot = start;
                 let mut last = String::new();
-                for path in &dropped {
+                for (slot, path) in (start..).zip(&dropped) {
                     if slot > 5 {
                         break;
                     }
                     last = load_into_slot(&params, slot, path);
-                    slot += 1;
                 }
                 st.selected_slot = start;
                 st.status = last;

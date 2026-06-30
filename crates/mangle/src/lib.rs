@@ -202,8 +202,7 @@ impl MangleParams {
                         }
                     }))
                     .with_string_to_value(Arc::new(move |s| {
-                        s.trim()
-                            .split_whitespace()
+                        s.split_whitespace()
                             .next()
                             .and_then(|t| t.parse::<f32>().ok())
                             .map(|d| map.to_norm(d))
@@ -712,8 +711,8 @@ impl Plugin for Mangle {
         // 6. Output slices.
         let output = buffer.as_slice();
         let (first, second) = output.split_at_mut(1);
-        let out_l: &mut [f32] = &mut first[0];
-        let out_r: &mut [f32] = &mut second[0];
+        let out_l: &mut [f32] = first[0];
+        let out_r: &mut [f32] = second[0];
         out_l.fill(0.0);
         out_r.fill(0.0);
 

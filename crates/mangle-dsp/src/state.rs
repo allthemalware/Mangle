@@ -261,6 +261,9 @@ pub fn hex_encode(data: &[u8]) -> String {
     s
 }
 
+// `usize::is_multiple_of` would be cleaner but needs Rust 1.87; the crate keeps
+// a lower MSRV (see the blake3 pin), so the explicit modulo stays.
+#[allow(clippy::manual_is_multiple_of)]
 pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
     if s.len() % 2 != 0 {
         return None;
