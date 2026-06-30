@@ -101,6 +101,9 @@ pub struct LaneParams {
     pub shape: f32,
     /// -1..1.
     pub skew: f32,
+    /// Pos>Pitch: when true, the grain read speed follows the scan-position
+    /// velocity (tape/vinyl drag) instead of Direction. Granular/Cloud only.
+    pub pos_pitch: bool,
     pub algo: Algo,
     /// Synthesis mode for this lane (Granular / Stretch / Cloud).
     pub mode: GrainMode,
@@ -128,6 +131,7 @@ impl Default for LaneParams {
             direction: 1.0,
             shape: 0.0,
             skew: 0.0,
+            pos_pitch: false,
             algo: Algo::Linear,
             mode: GrainMode::Granular,
         }
@@ -191,6 +195,11 @@ pub struct Lane {
     /// Stretch-mode read playhead per channel, as normalized loop-window
     /// phase in [0, 1). Unused by Granular/Cloud.
     playheads: [f64; 2],
+    /// Pos>Pitch: previous scan position (scan01 + Position) per channel, and
+    /// the velocity derived from it (source samples per output sample). NaN
+    /// phase = uninitialized (first chunk after reset has zero velocity).
+    pos_phase: [f64; 2],
+    pos_vel: [f64; 2],
     /// Spectral-mode phase vocoder. Pre-allocated (boxed to keep `Lane`
     /// small) so switching into Spectral never allocates on the audio thread.
     spectral: Box<SpectralState>,
@@ -204,6 +213,8 @@ impl Lane {
             scratch: Vec::with_capacity(64),
             rng: Rng::new(seed),
             playheads: [0.0; 2],
+            pos_phase: [f64::NAN; 2],
+            pos_vel: [0.0; 2],
             spectral: Box::new(SpectralState::new()),
         }
     }
@@ -224,6 +235,8 @@ impl Lane {
         self.grains.clear();
         self.emitters = [Emitter::default(), Emitter::default()];
         self.playheads = [0.0; 2];
+        self.pos_phase = [f64::NAN; 2];
+        self.pos_vel = [0.0; 2];
         self.spectral.reset();
     }
 
@@ -252,6 +265,25 @@ impl Lane {
             self.spectral
                 .process(p, bank, sample_rate, out_l, out_r, block);
             return;
+        }
+
+        // 0. Pos>Pitch: track the scan-position velocity per channel (source
+        //    samples per output sample) so spawn can drive grain read speed from
+        //    it (tape/vinyl drag). Tracked every chunk so a toggle doesn't spike.
+        for (ch, pc) in p.iter().enumerate() {
+            self.pos_vel[ch] = match resolve_window(pc, bank) {
+                Some((_, _, wlen)) => {
+                    let cur = scan_offset(pc, scan, ch as u8) as f64 + pc.position as f64;
+                    let vel = if self.pos_phase[ch].is_nan() {
+                        0.0 // first chunk after reset: no previous phase
+                    } else {
+                        (cur - self.pos_phase[ch]) * wlen as f64 / block.max(1) as f64
+                    };
+                    self.pos_phase[ch] = cur;
+                    vel.clamp(-32.0, 32.0)
+                }
+                None => 0.0,
+            };
         }
 
         // 1. Collect emissions for this block (no spawning inside the
@@ -349,6 +381,9 @@ impl Lane {
         let pitch = p.pitch_st + p.key_track * (p.note - slot.root_note as f32);
         let pitch_ratio = 2.0f64.powf(pitch as f64 / 12.0);
         let dir = p.direction.clamp(-1.0, 1.0) as f64;
+        // Pos>Pitch (tape/vinyl drag): grain read speed follows the scan-position
+        // velocity instead of Direction; Pitch still transposes via pitch_ratio.
+        let speed = if p.pos_pitch { self.pos_vel[channel as usize] } else { dir };
 
         // Per-mode read start (absolute samples) and per-output-sample increment.
         let (start, increment) = match p.mode {
@@ -357,7 +392,7 @@ impl Lane {
             GrainMode::Granular | GrainMode::Spectral => {
                 // Loop-LFO scan (when looping) + Position; speed = Direction × pitch.
                 let frac = (scan_offset(p, scan, channel) + p.position).rem_euclid(1.0);
-                (wstart as f64 + frac as f64 * wlen as f64, dir * pitch_ratio)
+                (wstart as f64 + frac as f64 * wlen as f64, speed * pitch_ratio)
             }
             GrainMode::Stretch => {
                 // Playhead (normalized window phase) sampled at this emission's
@@ -372,7 +407,7 @@ impl Lane {
                 // a smear; the Loop-LFO scan still offsets the spray centre.
                 let spray = self.rng.bipolar() * p.jitter.clamp(0.0, 1.0);
                 let frac = (scan_offset(p, scan, channel) + p.position + spray).rem_euclid(1.0);
-                (wstart as f64 + frac as f64 * wlen as f64, dir * pitch_ratio)
+                (wstart as f64 + frac as f64 * wlen as f64, speed * pitch_ratio)
             }
         };
 
@@ -1054,5 +1089,44 @@ mod tests {
         let early = rms(&l[0..256]); // first hop
         let later = rms(&l[1024..1280]); // steady state
         assert!(early > 0.5 * later, "onset ramped, not primed: early {early}, later {later}");
+    }
+
+    #[test]
+    fn pos_pitch_drives_pitch_from_scan_velocity() {
+        let sr = 48_000.0;
+        let n_samples = 96_000usize;
+        let bank = sine_bank(1000.0, n_samples, sr); // 1 kHz over the full window
+        let wlen = n_samples as f32;
+        // Direction 0 would freeze the read; Pos>Pitch instead drives read speed
+        // from the scan velocity. Sweep the scan so velocity = 2.0 source-samples
+        // per output-sample → the 1 kHz sine reads at 2× → ~2 kHz.
+        let p = LaneParams {
+            mode: GrainMode::Granular,
+            pos_pitch: true,
+            direction: 0.0,
+            pitch_st: 0.0,
+            loop_on: true,
+            rate_hz: 80.0,
+            linked: true,
+            length_val: 100.0,
+            ..Default::default()
+        };
+        let mut lane = Lane::new(11);
+        let total = 48_000usize;
+        let mut l = vec![0.0f32; total];
+        let mut r = vec![0.0f32; total];
+        let block = 512usize;
+        let (mut done, mut s) = (0usize, 0.0f32);
+        while done < total {
+            let n = (total - done).min(block);
+            lane.process(&[p, p], &bank, (s, s), sr, &mut l[done..done + n], &mut r[done..done + n], n);
+            s += 4.0 * n as f32 / wlen; // holds scan velocity at 2.0 regardless of n
+            done += n;
+        }
+        for v in &l {
+            assert!(v.is_finite());
+        }
+        let f = dominant_freq(&l, sr);
+        assert!((f - 2000.0).abs() < 150.0, "Pos>Pitch tape-drag freq {f} Hz, expected ~2000");
     }
 }

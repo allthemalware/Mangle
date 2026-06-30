@@ -90,7 +90,7 @@ on individual voices. Snapshot rule applies to everything marked ⟲.
 | Loop Size ⟲| 0.00–2.00×                             | 1.00×              | lin  | A M PN    | Scales the slot loop window about its midpoint. |
 | Gate Sync  | off / on                               | off                | bool | A S       | Retriggers the Loop LFO on engine gate / note-on — loop-player restart behavior. |
 | Pitch ⟲    | -12–+12 st (cent resolution)           | 0 st               | lin  | A M PN    | Added on top of Key tracking and note-expression tuning. |
-| Pos>Pitch  | off / on                               | off                | bool | A S       | Pitch follows position delta (tape/vinyl drag). Audition by sweeping Loop LFO Rate with Loop on. |
+| Pos>Pitch  | off / on                               | off                | bool | A S       | Grain read speed follows the scan-position velocity (Loop LFO + Position delta) instead of Direction — tape/vinyl drag; Pitch still transposes. Granular/Cloud modes only. Audition by sweeping Loop LFO Rate with Loop on. |
 | Direction ⟲| -100–+100 %                            | +100 %             | lin  | A M PN    | Signed playback-speed scalar: -100 reverse, +100 forward, 0 freezes the grain on its start sample (spectral-freeze territory). |
 | Shape ⟲    | 0–100 %                                | 0 %                | lin  | A M PN    | Grain envelope: 0 cosine, 50 smooth trapezoid, 100 rectangle. |
 | Skew ⟲     | -100–+100 %                            | 0 %                | lin  | A M PN    | Envelope tilt: -100 pluck attack, +100 reverse swell. |

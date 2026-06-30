@@ -63,6 +63,7 @@ pub fn lane_params(
         direction: d(16) / 100.0,
         shape: d(17) / 100.0,
         skew: d(18) / 100.0,
+        pos_pitch: d(15) >= 0.5,
         algo: Algo::from_index(d(19) as usize),
         mode: GrainMode::from_index(d(20) as usize),
     };
