@@ -99,9 +99,13 @@ impl VoiceManager {
         self.counter += 1;
         let stamp = self.counter;
 
-        // Prefer a fully-finished voice within the polyphony window, else
-        // steal the oldest. Voices beyond `max_voices` (after the limit was
-        // lowered mid-flight) ring out but are never re-allocated.
+        // Prefer a fully-finished (free) voice in the polyphony window. Else
+        // steal the least disruptive sounding one: a released (gate-off,
+        // ringing-out) voice before a held one, oldest within each group. This
+        // is the design's "oldest-then-quietest", made release-aware — a
+        // releasing tail is the quietest thing to cut. Voices beyond
+        // `max_voices` (after the limit was lowered mid-flight) ring out but are
+        // never re-allocated.
         let limit = self.max_voices.min(self.voices.len());
         let idx = if let Some(i) = self.voices[..limit].iter().position(|v| !v.sounding()) {
             i
@@ -109,7 +113,7 @@ impl VoiceManager {
             self.voices[..limit]
                 .iter()
                 .enumerate()
-                .min_by_key(|(_, v)| v.stamp)
+                .min_by_key(|(_, v)| (v.gate, v.stamp))
                 .map(|(i, _)| i)
                 .unwrap_or(0)
         };
@@ -168,6 +172,39 @@ mod tests {
         assert!(!vm.voices.iter().any(|v| v.note == 60 && v.gate));
         // Pre-allocated pool: note_on never grows the vec.
         assert_eq!(vm.voices.len(), 16);
+    }
+
+    #[test]
+    fn steals_released_ringing_voice_before_older_held_one() {
+        use crate::engine::LaneParams;
+        use crate::sample::{SampleBank, SampleSlot};
+        let sr = 48_000.0;
+        let mut bank = SampleBank::new();
+        bank.slots[0] = Some(SampleSlot::test_tone(sr));
+        let mut vm = VoiceManager::new(2, 1);
+        vm.note_on(60, 1, 0, 0.8, 0.0); // voice 0: older, stays held
+        vm.note_on(64, 2, 0, 0.8, 0.0); // voice 1: newer
+        // Give both voices live grains so they count as "ringing".
+        let p = LaneParams { loop_on: false, ..Default::default() };
+        let mut l = vec![0.0f32; 256];
+        let mut r = vec![0.0f32; 256];
+        for v in vm.voices.iter_mut().take(2) {
+            v.lanes[0].process(&[p, p], &bank, (0.0, 0.0), sr, &mut l, &mut r, 256);
+        }
+        assert!(vm.voices[0].lanes[0].active_grains() > 0);
+        assert!(vm.voices[1].lanes[0].active_grains() > 0);
+        // Release the *newer* voice (64): gate off, but its tail still rings.
+        vm.note_off(64, 2);
+        assert!(!vm.voices[1].gate && vm.voices[1].sounding());
+        // A new note steals the released voice, sparing the older *held* note 60
+        // (pure oldest-stealing would have taken 60 instead).
+        vm.note_on(67, 3, 0, 0.8, 0.0);
+        assert!(vm.voices.iter().any(|v| v.note == 60 && v.gate), "older held note was stolen");
+        assert!(vm.voices.iter().any(|v| v.note == 67 && v.gate), "new note not allocated");
+        assert!(
+            !vm.voices.iter().any(|v| v.note == 64 && v.note_id == 2),
+            "released voice should have been reused"
+        );
     }
 
     #[test]
