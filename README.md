@@ -134,6 +134,8 @@ bash tools/run-smoketest.sh     # drives the built .clap through a headless CLAP
 Architecture, crate breakdown and API notes are in
 [`README.old.md`](README.old.md) and [`BUILD_NOTES.md`](BUILD_NOTES.md).
 
+<script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script><script type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#48663b', 'T5F122USRI');kofiwidget2.draw();</script> 
+
 ## License note
 
 CLAP only — VST3 export is deliberately disabled to keep the GPLv3
