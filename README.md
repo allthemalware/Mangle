@@ -2,150 +2,140 @@
 
 [![CI](https://github.com/TheWhyteWolf/Mangle/actions/workflows/ci.yml/badge.svg)](https://github.com/TheWhyteWolf/Mangle/actions/workflows/ci.yml)
 
-Granular texture instrument (CLAP). Three grain engines × six sample slots,
-per-engine Loop LFOs, six global LFOs, Drift + Noise modulators, a 32-slot
-mod matrix, drawable curves, true CLAP polyphony with per-note modulation.
-Each engine runs a selectable synthesis **mode** — Grains / Stretch / Cloud /
-Spectral (phase vocoder) — in the spirit of Clouds & Plaits. Spiritual port of
-the Torsion Texture Lab Rack Extension, minus the rack.
+A granular texture instrument in **CLAP** plugin form. Load up to six
+samples, sculpt them with three independent grain engines, and modulate
+everything with LFOs, drift, noise, drawable curves and a 32-slot mod
+matrix. Each engine can run in one of four synthesis modes — **Grains,
+Stretch, Cloud, or Spectral** (a phase vocoder) — so it moves between
+Clouds-style clouds, tape-scrub, and spectral freeze. A spiritual port of
+the Torsion Texture Lab, minus the rack.
 
-Design source of truth: [`mangle-parameter-map.md`](mangle-parameter-map.md)
-(ranges, defaults, flags, ID scheme, build order).
+> **Alpha (v0.1.0).** This is a testing build. The DSP core and plugin
+> shell are unit-tested and load in a CLAP host, but several features have
+> not yet been auditioned live in a DAW — see [Known limitations](#known-limitations-what-to-test).
+> Feedback and bug reports are exactly what this build is for.
 
-## Status
+---
 
-Build-order steps 1–7 and 9 present, plus the tested cores of steps 8 and 10.
-The `mangle` plugin crate compiles and loads (see `BUILD_NOTES.md`); the
-DSP core is the fully validated part — `cargo test -p mangle-dsp` (94 tests).
+## What you need
 
-- `mangle-dsp` — dependency-free core: stable 380-entry parameter table,
-  value mappings, the full grain engine (snapshot rule, COLA-gapless linked
-  length, per-engine read/stretch **Algo**: Nearest / Linear / Hermite /
-  Sinc-8, **per-channel parameter sets** so the L/R emitters diverge under
-  stereo modulation), polyphonic voice manager, the patch→runtime resolver
-  (tempo sync, per-note offset composition), the **mod-matrix runtime**
-  (row decode, global/voice application scopes, stereo source table, Loop
-  Position window shifting, env follower, global LFO/Drift/Noise source
-  engine with one-block feedback), **Squeeze** (gated upward leveler into
-  a zero-lookahead limiter, stereo-linked), the **state format** (versioned
-  binary blob: 9 curves, RANDOM locks + settings, sample slot references;
-  hex codec for the host field store), the RANDOM engine with per-unit
-  locks, and **selectable per-engine modes** — Grains / Stretch (time-stretch +
-  scrub) / Cloud (diffuse smear) / Spectral (a streaming phase vocoder over an
-  in-crate FFT: spectral freeze, formant-preserving pitch shift, blur, identity
-  phase locking, and a zero-latency primed onset). 94 unit tests
-  (`cargo test -p mangle-dsp`).
-- `mangle` — nih-plug CLAP shell with the **full 380-parameter set
-  generated from the table** (manual `Params` impl, no derive): continuous
-  params normalized with table-driven display formatting, stepped params
-  with proper names (divisions, matrix sources/dests, algorithms, note
-  names), per-note-modulatable params carrying CLAP poly-mod IDs.
-  `PolyModulation`/`MonoAutomation`/`Choke` handled; `VoiceTerminated`
-  reported. All three engines render per voice through their Loop LFOs with
-  tempo sync, key tracking (per-slot root), slot loop/gain params applied
-  live, stereo width + master level. **The matrix runs live**: global pass
-  → source tick → per-voice stereo passes, with Macros (incl. per-note
-  offsets), pressure, velocity, note, Loop-LFO feedback and the output env
-  follower all wired as sources. Non-param state (curves, locks, random
-  settings, slot refs) persists through nih-plug's field store with an
-  RT-safe generation-counted curve sync, and Squeeze sits in the output
-  chain (width → Squeeze → level). Built-in additive fallback tone until
-  the loader (step 4) lands. Untested against a live host yet — `API:`
-  comments mark the likely nih-plug friction points.
-- `mangle-loader` — sample loading: symphonia decode (wav/flac/aiff/ogg/
-  vorbis/mp3/adpcm), built-in arbitrary-ratio windowed-sinc resampling
-  (alias-filtered decimation, verified by SNR tests), BLAKE3 content
-  hashing, 300 s cap, mono→stereo, Torsion multi-drop slot filling.
-  10 tests (`cargo test` inside the crate). blake3 is pinned to 1.5.x so
-  older toolchains can resolve the graph — safe to bump on current Rust.
-- `mangle` editor (`crates/mangle/src/editor.rs`) — the full
-  tracker-terminal GUI (egui): hand-painted value cells, waveform strip
-  with loop-edge/region dragging, all three grain engines + Loop LFOs,
-  LFO 1–6, Drift/Noise/Macros, the 32-slot matrix (4 pages), the RANDOM
-  die with per-unit padlocks + Amount/Complexity menu, a TOOLS menu
-  (init, reroll, copy-grain), and the EDIT.CURVES screen (freehand draw,
-  presets, smooth/invert/mirror). Written against the egui API from
-  memory — **will need an API-drift fixing pass on first build**; the
-  fragile call sites are catalogued in `BUILD_NOTES.md`.
-- `xtask` — nih-plug bundler.
+- **A CLAP host.** Developed and tested against **Bitwig**; any CLAP-capable
+  host (Bitwig, Reaper 7+, Qtractor, …) should work.
+- **Rust (current stable)** to build the plugin — install via [rustup](https://rustup.rs).
+- **Linux** is the tested platform (developed on Arch). It should also build
+  on macOS/Windows via the same command, but those are untested — reports welcome.
 
-## Layout
+## Build & install
 
-```
-mangle-parameter-map.md     design doc (the contract)
-crates/mangle-dsp/          pure-Rust core, zero deps
-  src/params.rs             param table: IDs, maps, defaults, CLAP flags
-  src/matrix.rs             mod sources/dests, stable enum indices, slot eval
-  src/random.rs             RANDOM engine + per-unit locks + pools
-  src/curve.rs              drawable curves, stereo LFOs, drift, noise
-  src/grain.rs              grain snapshot, shape/skew envelope, emitter clock
-  src/rng.rs                seeded SplitMix64→Xoroshiro128** (reproducible)
-crates/mangle/              nih-plug CLAP shell (cdylib)
-xtask/                      `cargo xtask bundle` support
-```
-
-## Loading samples (pre-GUI)
-
-Until the GUI lands, two paths exist: presets — slot references stored in
-state load automatically on activate (with hash-mismatch warnings) — and
-the dev hook `MANGLE_SAMPLE=/path/to/file` which fills slot 1 and records
-the reference. Drag-and-drop arrives with the GUI (build step 6).
-
-## Build
-
-Needs current stable Rust (rustup). From the repo root:
+From the repo root:
 
 ```sh
 cargo xtask bundle mangle --release
 ```
 
-Output: `target/bundled/mangle.clap` → copy/symlink into `~/.clap/`.
-Bitwig picks it up on the next plugin rescan.
+This produces the plugin bundle at:
 
-Run the core tests (no nih-plug fetch needed):
-
-```sh
-cargo test -p mangle-dsp
+```
+target/bundled/mangle.clap
 ```
 
-## Stretch algorithms
+Copy or symlink it into your CLAP folder, then rescan plugins in your host:
 
-Each grain engine has an **Algo** switch choosing how grains read and
-resample their source: Nearest (aliased, gritty), Linear (the neutral
-workhorse), Hermite (smooth 4-point), Sinc-8 (clean windowed sinc, holds up
-under big pitch shifts). It is snapshot-frozen per grain like every other
-grain parameter, randomizable (in the default pool), and stored as a step
-index so spectral modes (Paulstretch-style smear) can append in v2 without
-breaking saved patches.
+| OS | CLAP folder |
+|----|-------------|
+| Linux | `~/.clap/` |
+| macOS | `~/Library/Audio/Plug-Ins/CLAP/` |
+| Windows | `%COMMONPROGRAMFILES%\CLAP\` |
 
-## RANDOM locks
+```sh
+# Linux example
+ln -s "$PWD/target/bundled/mangle.clap" ~/.clap/mangle.clap
+```
 
-Every randomizable unit has its own lock: Grain 1–3, Loop LFO 1–3, LFO 1–6,
-Drift, Noise, Macros (locked by default), the mod matrix, and the sample
-loop points. A locked unit's parameters are never touched, and the matrix
-generator will neither route *into* it nor use it as a source/scale for new
-rows. Locks live in plugin state, not host params.
+Bitwig picks it up on the next plugin rescan.
 
-Planned UI: a padlock glyph on every section header toggles that unit's
-lock; the RANDOM button fires a seeded roll, and long-press/right-click
-opens a popover with Amount, Complexity, the parameter pools (grain Level +
-Pitch excluded by default, matching Torsion), and the source/dest pools.
-Seeds are stored in state so a happy accident can be recalled.
+## First sound (30 seconds)
 
-## Hardening notes
+1. Add **Mangle** to an instrument track and play a note — you'll hear a
+   built-in fallback tone even with no sample loaded, so you know it's alive.
+2. Open the GUI and click a slot's **LOAD** button to load a sample
+   (wav / flac / aiff / ogg / mp3). The waveform appears in the strip.
+3. Play again — the sample now plays with key tracking. Drag the loop edges
+   on the waveform to set the grain window.
+4. Tweak the grain cells (RATE, LENGTH, SPRAY, PITCH, SHAPE…), switch **MODE**
+   between Grains / Stretch / Cloud / Spectral, and hit **⚄ RND** to roll a
+   random patch. Open **CURVES** to draw your own LFO/envelope shapes.
 
-The audio path is allocation-free in steady state and at note-on: all 16
-voices (grain pools, offset lists, scratch) are pre-allocated, and the
-Sinc-8 table is pre-warmed in `initialize`. Modulation runs on a fixed
-~64-sample control chunk regardless of host buffer size, Drift's random
-forcing is scaled by 1/√dt so its character is buffer-size-invariant, LFOs
-honor their Transport flag (phase locked to the host timeline while
-playing), CLAP note-expression tuning lands in the pitch path, and the lag
-/ envelope one-poles flush denormals.
+### Loading samples — other paths
+- **Per-slot LOAD button** (native file picker) — the reliable path, works in
+  every host.
+- **Drag & drop** onto the waveform strip — supported, but many hosts don't
+  forward file drops into an embedded plugin window, so it may not fire; use
+  LOAD if so.
+- **`MANGLE_SAMPLE=/path/to/file`** environment variable — fills slot 1 on
+  load (handy for quick testing from the terminal).
+- **Presets** remember their sample references and reload them automatically
+  (you'll get a log warning if a file changed or moved).
+
+## What's in it
+
+- **6 sample slots**, each with root note, loop points and gain.
+- **3 grain engines**, each with its own mode (Grains / Stretch / Cloud /
+  Spectral), read/resample algorithm (Nearest / Linear / Hermite / Sinc-8),
+  pitch, spray, jitter, shape/skew envelope, pan, Pos→Pitch tape-drag, and a
+  **pitch-quantize / scale lock** (chromatic, octave, 5th, major, minor,
+  pentatonic).
+- **Modulators:** per-engine Loop LFOs, 6 global LFOs (with a one-shot / MSEG
+  mode), Drift, Noise, Macros, and drawable curves.
+- **32-slot mod matrix** with stereo sources and per-channel routing.
+- **Master filter** (LP / BP / HP / Notch) with matrix-modulatable cutoff &
+  resonance.
+- **Note expression:** per-note tuning, pressure, volume and pan.
+- **Squeeze** output leveler, stereo width, master level.
+- **RANDOM** with per-section padlocks so you can lock what you like and
+  reroll the rest.
+
+The full parameter reference (ranges, defaults, IDs) lives in
+[`mangle-parameter-map.md`](mangle-parameter-map.md).
+
+## Known limitations — what to test
+
+These landed after the last live-host session and pass automated tests but
+**have not been auditioned in a DAW yet**. Please give them a hard listen and
+report anything off:
+
+- Master **filter** (especially heavy cutoff/resonance modulation from the matrix)
+- **Pitch-quantize / scale lock**
+- **One-shot / MSEG** LFO mode
+- **Note-expression** volume & pan
+- **Spectral** mode (phase vocoder) — freeze, formant shift, blur
+- Sample-accurate note timing at speed
+
+When testing, watch for: clicks/zipper on parameter automation, audible
+glitches when stealing voices under heavy polyphony, CPU spikes, and any
+dropout or crash. Note your host, sample rate and buffer size in reports.
+
+## Reporting issues
+
+Open an issue at **[github.com/TheWhyteWolf/Mangle/issues](https://github.com/TheWhyteWolf/Mangle/issues)**.
+Include: host + version, OS, sample rate / buffer size, steps to reproduce,
+and (if you can) the patch or a short clip of the artifact.
+
+## For developers
+
+Run the validated DSP tests (no plugin/host fetch needed):
+
+```sh
+cargo test -p mangle-dsp        # ~110 unit tests
+cargo test --workspace          # everything
+bash tools/run-smoketest.sh     # drives the built .clap through a headless CLAP host
+```
+
+Architecture, crate breakdown and API notes are in
+[`README.old.md`](README.old.md) and [`BUILD_NOTES.md`](BUILD_NOTES.md).
 
 ## License note
 
-VST3 export is deliberately disabled (`default-features = false` on
-`nih_plug`) to keep the GPLv3 `vst3-sys` out of the dependency tree. CLAP
-only. Re-enable the `vst3` feature if you ever want a VST3 build and accept
-the license implications.
+CLAP only — VST3 export is deliberately disabled to keep the GPLv3
+`vst3-sys` crate out of the dependency tree. Re-enable the `vst3` feature in
+`Cargo.toml` if you want a VST3 build and accept the license implications.
