@@ -18,7 +18,7 @@
 //! later refinement; grain snapshots already read instantaneous values.
 
 use crate::curve::{Curve, DriftPair, LfoState, NoisePair};
-use crate::matrix::{self, dest_from_index, GrainDest, LfoDest, ModDest, ModSource};
+use crate::matrix::{self, dest_from_index, FxDest, GrainDest, LfoDest, ModDest, ModSource};
 use crate::params::{pid, Map, Module, ParamTable, Patch, N_MATRIX_ROWS};
 use crate::resolve;
 use crate::rng::Rng;
@@ -55,6 +55,9 @@ pub enum Target {
     VoiceParam(u16),
     /// Grain Loop Position for engine n (voice pass, side channel).
     LoopPos(u8),
+    /// Table position of a master-filter (Fx) parameter. Applied per channel in
+    /// the output chain (`modulated_filter`), not in the global/voice passes.
+    FilterParam(u16),
 }
 
 fn lfo_dest_param(sub: LfoDest) -> u8 {
@@ -63,6 +66,15 @@ fn lfo_dest_param(sub: LfoDest) -> u8 {
         LfoDest::Phase => 5,
         LfoDest::Rate => 2,
         LfoDest::Lag => 7,
+    }
+}
+
+/// Fx (master filter) param index for a filter destination — Cutoff=2, Reso=3
+/// in `fx_specs` (parameter map §Fx).
+fn fx_dest_param(fd: FxDest) -> u8 {
+    match fd {
+        FxDest::Cutoff => 2,
+        FxDest::Reso => 3,
     }
 }
 
@@ -98,6 +110,9 @@ pub fn dest_target(idx: u16, table: &ParamTable) -> Target {
             Some(i) => Target::VoiceParam(table.pos(pid(Module::Grain, n, i)) as u16),
             None => Target::LoopPos(n),
         },
+        ModDest::Fx(fd) => {
+            Target::FilterParam(table.pos(pid(Module::Fx, 0, fx_dest_param(fd))) as u16)
+        }
     }
 }
 
@@ -200,6 +215,40 @@ pub fn apply_global(patch: &mut Patch, rows: &[DecodedRow], sv: &SourceValues) {
     }
 }
 
+/// Per-channel modulated master-filter values (normalized 0..1), from the
+/// matrix. The Fx Cutoff/Reso destinations are global-scope but evaluated per
+/// channel here, so a stereo source (an LFO with St.Phase, etc.) sweeps L and R
+/// divergently — the stereo split/invert/merge move. Returns the base values
+/// unchanged when nothing routes to the filter.
+pub fn modulated_filter(
+    base: &Patch,
+    rows: &[DecodedRow],
+    sv: &SourceValues,
+    cutoff_pos: u16,
+    reso_pos: u16,
+) -> [(f32, f32); 2] {
+    let bc = base.values[cutoff_pos as usize];
+    let br = base.values[reso_pos as usize];
+    let mut out = [(bc, br); 2];
+    for (ch, o) in out.iter_mut().enumerate() {
+        let (mut cut, mut res) = (bc, br);
+        for row in rows {
+            let c = contribution(row, sv, ch);
+            for (amt, t) in [(row.amt1, row.t1), (row.amt2, row.t2)] {
+                if let Target::FilterParam(pos) = t {
+                    if pos == cutoff_pos {
+                        cut += amt * c;
+                    } else if pos == reso_pos {
+                        res += amt * c;
+                    }
+                }
+            }
+        }
+        *o = (cut.clamp(0.0, 1.0), res.clamp(0.0, 1.0));
+    }
+    out
+}
+
 // ----------------------------------------------------------- sources ---
 
 /// Output envelope follower (the "Env" source). Feed it the final stereo
@@ -214,14 +263,22 @@ impl EnvFollower {
         let atk = 1.0 - (-1.0 / (0.005 * sample_rate)).exp();
         let rel = 1.0 - (-1.0 / (0.200 * sample_rate)).exp();
         for (a, b) in l.iter().zip(r.iter()) {
+            // Guard non-finite input: a NaN would stick `self.value` at NaN
+            // forever (comparisons are false on NaN), and `value()`'s `.min(1.0)`
+            // would then silently report a constant 1.0 to every matrix row.
             let x = a.abs().max(b.abs());
+            let x = if x.is_finite() { x } else { 0.0 };
             let coef = if x > self.value { atk } else { rel };
             self.value += (x - self.value) * coef;
         }
     }
 
     pub fn value(&self) -> f32 {
-        self.value.min(1.0)
+        if self.value.is_finite() {
+            self.value.min(1.0)
+        } else {
+            0.0
+        }
     }
 }
 
@@ -441,6 +498,36 @@ mod tests {
     }
 
     #[test]
+    fn filter_dests_modulate_per_channel() {
+        use crate::matrix::FxDest;
+        let (t, mut p) = setup();
+        let cut_pos = t.pos(pid(Module::Fx, 0, 2)) as u16;
+        let res_pos = t.pos(pid(Module::Fx, 0, 3)) as u16;
+        p.values[cut_pos as usize] = 0.5; // mid cutoff so mod can go both ways
+
+        set_row(
+            &mut p, &t, 0,
+            ModSource::Drift(0), 100.0, ModDest::Fx(FxDest::Cutoff),
+            0.0, ModDest::None, ModSource::None,
+        );
+        let mut rows = [DecodedRow::default(); 32];
+        let n = decode_matrix(&p, &t, &mut rows);
+        assert_eq!(n, 1, "the Fx Cutoff row should decode");
+
+        // Stereo source: L drives the cutoff up, R drives it down (stereo-invert).
+        let mut sv = SourceValues::zero();
+        sv.set(ModSource::Drift(0), 1.0, -1.0);
+        let m = modulated_filter(&p, &rows[..n], &sv, cut_pos, res_pos);
+        assert!(m[0].0 > 0.5, "left cutoff should rise: {}", m[0].0);
+        assert!(m[1].0 < 0.5, "right cutoff should fall: {}", m[1].0);
+
+        // Nothing routed to the filter → base values pass through unchanged.
+        let none = modulated_filter(&p, &[], &sv, cut_pos, res_pos);
+        assert_eq!(none[0], (0.5, p.values[res_pos as usize]));
+        assert_eq!(none[1], (0.5, p.values[res_pos as usize]));
+    }
+
+    #[test]
     fn scale_column_multiplies() {
         let (t, mut p) = setup();
         set_row(
@@ -521,6 +608,21 @@ mod tests {
             env.feed(&zeros, &zeros, 48_000.0);
         }
         assert!(env.value() < 0.01);
+    }
+
+    #[test]
+    fn env_follower_recovers_from_nan() {
+        // A NaN block must not stick the follower at NaN (which .min(1.0) would
+        // report as a constant 1.0). It should read ~0 and then track real input.
+        let mut env = EnvFollower::default();
+        let nans = vec![f32::NAN; 4800];
+        let zeros = vec![0.0f32; 4800];
+        env.feed(&nans, &nans, 48_000.0);
+        assert!(env.value().is_finite(), "follower stuck non-finite after NaN");
+        assert!(env.value() < 0.01, "NaN leaked into the follower value: {}", env.value());
+        let ones = vec![1.0f32; 4800];
+        env.feed(&ones, &zeros, 48_000.0);
+        assert!(env.value() > 0.9, "follower did not recover after NaN: {}", env.value());
     }
 
     #[test]

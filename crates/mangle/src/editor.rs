@@ -193,7 +193,8 @@ fn entropy_seed() -> u64 {
 /// on the GUI thread, then the result is queued for the audio thread to
 /// swap into the bank. Returns a short status string for display.
 fn load_into_slot(params: &MangleParams, slot: usize, path: &std::path::Path) -> String {
-    let sr = f32::from_bits(params.sr_bits.load(std::sync::atomic::Ordering::Acquire));
+    use std::sync::atomic::Ordering;
+    let sr = f32::from_bits(params.sr_bits.load(Ordering::Acquire));
     match mangle_loader::load_sample(path, sr) {
         Ok(loaded) => {
             let name = path
@@ -201,14 +202,30 @@ fn load_into_slot(params: &MangleParams, slot: usize, path: &std::path::Path) ->
                 .and_then(|n| n.to_str())
                 .unwrap_or("?")
                 .to_string();
+            let path_str = path.to_string_lossy().into_owned();
+            // Compute the waveform summary and update the display/slot-ref state
+            // here on the GUI thread so the audio-thread drain never allocates or
+            // takes a blocking lock.
+            let summary = crate::summarize(&loaded.slot);
+            if let Ok(mut w) = params.waveforms.write() {
+                w[slot.min(5)] = Some(summary.clone());
+            }
+            if let Ok(mut st) = params.extra.write() {
+                st.slot_refs[slot.min(5)] = Some(mangle_dsp::state::SlotRef {
+                    path: path_str.clone(),
+                    content_hash: loaded.content_hash,
+                });
+            }
+            params.extra_gen.fetch_add(1, Ordering::Release);
             if let Ok(mut q) = params.pending_loads.lock() {
                 // Replace any queued load already targeting this slot.
                 q.retain(|p| p.slot != slot);
                 q.push(PendingLoad {
                     slot,
                     sample: Box::new(loaded.slot),
-                    path: path.to_string_lossy().into_owned(),
+                    path: path_str,
                     content_hash: loaded.content_hash,
+                    summary,
                 });
             }
             format!("slot {} \u{2190} {}", slot + 1, name)
@@ -405,6 +422,93 @@ struct UiState {
 
 // -------------------------------------------------------------- entry ---
 
+/// One editor frame. Factored out of the `create` closure so the headless GUI
+/// test (`gui_tests`) can drive it without a host/window.
+fn draw_editor(
+    ctx: &egui::Context,
+    setter: &ParamSetter,
+    params: &Arc<MangleParams>,
+    st: &mut UiState,
+) {
+    // Work on a copy of the extra state; write back once if edited.
+    let mut ex = match params.extra.read() {
+        Ok(g) => g.clone(),
+        Err(_) => return,
+    };
+    let mut ex_changed = false;
+
+    // --- drag & drop -------------------------------------------------
+    // While files hover, mark a drop target (slot under the pointer if it's
+    // over the waveform strip, else the selected slot). On drop, load each file
+    // into successive slots from the target onward.
+    let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
+    if hovering {
+        st.drop_target = Some(st.selected_slot.min(5));
+    } else if st.loop_drag.is_none() {
+        st.drop_target = None;
+    }
+    let dropped: Vec<std::path::PathBuf> = ctx.input(|i| {
+        i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect()
+    });
+    if !dropped.is_empty() {
+        let start = st.drop_target.unwrap_or(st.selected_slot).min(5);
+        let mut last = String::new();
+        for (slot, path) in (start..).zip(&dropped) {
+            if slot > 5 {
+                break;
+            }
+            last = load_into_slot(params, slot, path);
+        }
+        st.selected_slot = start;
+        st.status = last;
+        st.drop_target = None;
+    }
+
+    // Completed file-picker selections (from the per-slot LOAD buttons) load
+    // here, on the GUI thread, same path as drops.
+    if let Some(status) = poll_dialog_results(params) {
+        st.status = status;
+    }
+    // While any picker is open, keep repainting so its result shows up without
+    // needing a mouse move to wake the editor.
+    if params
+        .dialog_open
+        .iter()
+        .any(|b| b.load(std::sync::atomic::Ordering::Relaxed))
+    {
+        ctx.request_repaint();
+    }
+
+    header_bar(ctx, setter, params, st, &mut ex, &mut ex_changed);
+
+    egui::CentralPanel::default()
+        .frame(egui::Frame::new().fill(BG).inner_margin(4.0))
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if st.curves_mode {
+                    curves_screen(ui, st, &mut ex, &mut ex_changed);
+                } else {
+                    waveform_strip(ui, setter, params, st, &mut ex, &mut ex_changed);
+                    ui.add_space(GAP * 2.0);
+                    engines_row(ui, setter, params, &mut ex, &mut ex_changed);
+                    ui.add_space(GAP * 2.0);
+                    lfo_and_friends(ui, setter, params, &mut ex, &mut ex_changed);
+                    ui.add_space(GAP * 2.0);
+                    filter_panel(ui, setter, params);
+                    ui.add_space(GAP * 2.0);
+                    matrix_panel(ui, setter, params, st, &mut ex, &mut ex_changed);
+                }
+            });
+        });
+
+    if ex_changed {
+        if let Ok(mut w) = params.extra.write() {
+            *w = ex;
+        }
+        params.extra_gen.fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
+}
+
 pub(crate) fn create(params: Arc<MangleParams>) -> Option<Box<dyn Editor>> {
     let state = params.editor_state.clone();
     create_egui_editor(
@@ -418,89 +522,7 @@ pub(crate) fn create(params: Arc<MangleParams>) -> Option<Box<dyn Editor>> {
             style.visuals.override_text_color = Some(TEXT);
             ctx.set_style(style);
         },
-        move |ctx, setter, st: &mut UiState| {
-            // Work on a copy of the extra state; write back once if edited.
-            let mut ex = match params.extra.read() {
-                Ok(g) => g.clone(),
-                Err(_) => return,
-            };
-            let mut ex_changed = false;
-
-            // --- drag & drop -------------------------------------------------
-            // While files hover, mark a drop target (slot under the pointer if
-            // it's over the waveform strip, else the selected slot). On drop,
-            // load each file into successive slots from the target onward.
-            let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
-            if hovering {
-                st.drop_target = Some(st.selected_slot.min(5));
-            } else if st.loop_drag.is_none() {
-                st.drop_target = None;
-            }
-            let dropped: Vec<std::path::PathBuf> = ctx.input(|i| {
-                i.raw
-                    .dropped_files
-                    .iter()
-                    .filter_map(|f| f.path.clone())
-                    .collect()
-            });
-            if !dropped.is_empty() {
-                let start = st.drop_target.unwrap_or(st.selected_slot).min(5);
-                let mut last = String::new();
-                for (slot, path) in (start..).zip(&dropped) {
-                    if slot > 5 {
-                        break;
-                    }
-                    last = load_into_slot(&params, slot, path);
-                }
-                st.selected_slot = start;
-                st.status = last;
-                st.drop_target = None;
-            }
-
-            // Completed file-picker selections (from the per-slot LOAD
-            // buttons) load here, on the GUI thread, same path as drops.
-            if let Some(status) = poll_dialog_results(&params) {
-                st.status = status;
-            }
-            // While any picker is open, keep repainting so its result shows
-            // up without needing a mouse move to wake the editor.
-            if params
-                .dialog_open
-                .iter()
-                .any(|b| b.load(std::sync::atomic::Ordering::Relaxed))
-            {
-                ctx.request_repaint();
-            }
-
-            header_bar(ctx, setter, &params, st, &mut ex, &mut ex_changed);
-
-            egui::CentralPanel::default()
-                .frame(egui::Frame::new().fill(BG).inner_margin(4.0))
-                .show(ctx, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        if st.curves_mode {
-                            curves_screen(ui, st, &mut ex, &mut ex_changed);
-                        } else {
-                            waveform_strip(ui, setter, &params, st, &mut ex, &mut ex_changed);
-                            ui.add_space(GAP * 2.0);
-                            engines_row(ui, setter, &params, &mut ex, &mut ex_changed);
-                            ui.add_space(GAP * 2.0);
-                            lfo_and_friends(ui, setter, &params, &mut ex, &mut ex_changed);
-                            ui.add_space(GAP * 2.0);
-                            matrix_panel(ui, setter, &params, st, &mut ex, &mut ex_changed);
-                        }
-                    });
-                });
-
-            if ex_changed {
-                if let Ok(mut w) = params.extra.write() {
-                    *w = ex;
-                }
-                params
-                    .extra_gen
-                    .fetch_add(1, std::sync::atomic::Ordering::Release);
-            }
-        },
+        move |ctx, setter, st: &mut UiState| draw_editor(ctx, setter, &params, st),
     )
 }
 
@@ -783,7 +805,7 @@ fn waveform_strip(
 
 // ------------------------------------------------------------- engines ---
 
-const GRAIN_GRID: [(u8, &str); 20] = [
+const GRAIN_GRID: [(u8, &str); 21] = [
     (1, "RATE"),
     (2, "TEMPO"),
     (3, "DIV"),
@@ -804,6 +826,7 @@ const GRAIN_GRID: [(u8, &str); 20] = [
     (7, "PAN"),
     (8, "LEVEL"),
     (13, "GATE.SYNC"),
+    (21, "QUANT"),
 ];
 
 /// Relabel a grain cell for the engine's current Mode — surfacing the
@@ -820,7 +843,7 @@ fn mode_label(idx: u8, default: &'static str, mode: GrainMode) -> &'static str {
     }
 }
 
-const LFO_GRID: [(u8, &str); 9] = [
+const LFO_GRID: [(u8, &str); 10] = [
     (2, "RATE"),
     (3, "TEMPO"),
     (4, "DIV"),
@@ -830,6 +853,7 @@ const LFO_GRID: [(u8, &str); 9] = [
     (0, "GATE"),
     (1, "TRANS"),
     (8, "TRIG"),
+    (9, "1SHOT"),
 ];
 
 fn engines_row(
@@ -907,7 +931,8 @@ fn lfo_and_friends(
         ui.vertical(|ui| {
             ui.set_width(left_w);
             let label_w = 76.0; // LFO.n label + padlock gutter
-            let cw = (left_w - label_w - GAP * 9.0) / 9.0;
+            let n = LFO_GRID.len() as f32;
+            let cw = (left_w - label_w - GAP * n) / n;
             // Header row.
             ui.horizontal(|ui| {
                 let (hr, _) = ui.allocate_exact_size(vec2(label_w, CELL_H), Sense::hover());
@@ -963,6 +988,21 @@ fn lfo_and_friends(
                 });
             }
         });
+    });
+}
+
+// --------------------------------------------------------------- filter ---
+
+/// Master output filter (Module::Fx): On / Type / Cutoff / Reso. Cutoff and
+/// Reso are matrix destinations (Flt Cutoff / Flt Reso), so they sit just above
+/// the matrix.
+fn filter_panel(ui: &mut Ui, setter: &ParamSetter, params: &MangleParams) {
+    ui.horizontal(|ui| {
+        section_label(ui, "FILTER");
+        cell(ui, setter, &params.cp(Module::Fx, 0, 0), "ON", 64.0);
+        cell(ui, setter, &params.cp(Module::Fx, 0, 1), "TYPE", 84.0);
+        cell(ui, setter, &params.cp(Module::Fx, 0, 2), "CUTOFF", 116.0);
+        cell(ui, setter, &params.cp(Module::Fx, 0, 3), "RESO", 96.0);
     });
 }
 
@@ -1119,4 +1159,179 @@ fn curves_screen(
         9.0,
         DIM,
     );
+}
+
+// ------------------------------------------------------ headless gui test ---
+
+#[cfg(test)]
+mod gui_tests {
+    //! Headless render test for the editor: build every screen and poke it with
+    //! hostile pointer input, asserting no panic and finite geometry. The DAW's
+    //! window/host is replaced by a bare `egui::Context` and a stub
+    //! `GuiContext`. This is the Skrongle-`guitest` philosophy ported to egui.
+    use super::*;
+    use egui::{Context, Event, Modifiers, MouseWheelUnit, PointerButton, RawInput};
+    use nih_plug::prelude::{GuiContext, ParamPtr, PluginApi, PluginState};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// Minimal `GuiContext` so a `ParamSetter` can exist without a host. Param
+    /// writes are counted (begin/set/end) but not applied —
+    /// `ParamPtr::set_normalized_value` is crate-private to nih-plug — which is
+    /// fine: this harness checks the editor renders and handles input without
+    /// panicking, not value math.
+    #[derive(Default)]
+    struct TestHost {
+        begins: AtomicU32,
+        sets: AtomicU32,
+        ends: AtomicU32,
+    }
+    impl GuiContext for TestHost {
+        fn plugin_api(&self) -> PluginApi {
+            PluginApi::Clap
+        }
+        fn request_resize(&self) -> bool {
+            true
+        }
+        unsafe fn raw_begin_set_parameter(&self, _p: ParamPtr) {
+            self.begins.fetch_add(1, Ordering::Relaxed);
+        }
+        unsafe fn raw_set_parameter_normalized(&self, _p: ParamPtr, _v: f32) {
+            self.sets.fetch_add(1, Ordering::Relaxed);
+        }
+        unsafe fn raw_end_set_parameter(&self, _p: ParamPtr) {
+            self.ends.fetch_add(1, Ordering::Relaxed);
+        }
+        fn get_state(&self) -> PluginState {
+            unimplemented!("editor never reads host state")
+        }
+        fn set_state(&self, _s: PluginState) {}
+    }
+
+    fn press(pos: Pos2, pressed: bool) -> Event {
+        Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::default() }
+    }
+    fn click(ev: &mut Vec<Event>, x: f32, y: f32) {
+        let pos = Pos2::new(x, y);
+        ev.push(Event::PointerMoved(pos));
+        ev.push(press(pos, true));
+        ev.push(press(pos, false));
+    }
+    fn drag(ev: &mut Vec<Event>, from: Pos2, steps: impl Iterator<Item = Pos2>) {
+        ev.push(Event::PointerMoved(from));
+        ev.push(press(from, true));
+        let mut last = from;
+        for p in steps {
+            ev.push(Event::PointerMoved(p));
+            last = p;
+        }
+        ev.push(press(last, false));
+    }
+
+    #[test]
+    fn editor_renders_all_screens_without_panic() {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState::default();
+        let mut time = 0.0f64;
+
+        let mut frame = |st: &mut UiState, events: Vec<Event>| {
+            time += 0.05;
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 700.0))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            };
+            let out = ctx.run(input, |ctx| draw_editor(ctx, &setter, &params, st));
+            // Catch NaN rects / degenerate geometry (e.g. empty-waveform math).
+            for prim in ctx.tessellate(out.shapes, out.pixels_per_point) {
+                if let egui::epaint::Primitive::Mesh(m) = prim.primitive {
+                    for v in &m.vertices {
+                        assert!(
+                            v.pos.x.is_finite() && v.pos.y.is_finite(),
+                            "non-finite vertex at {:?}",
+                            v.pos
+                        );
+                    }
+                }
+            }
+        };
+
+        // Warm-up so layout rects exist before we start clicking them.
+        frame(&mut st, vec![]);
+        frame(&mut st, vec![]);
+
+        // Header sweep (hits the bool cells -> real param gestures).
+        {
+            let mut ev = Vec::new();
+            let mut x = 80.0;
+            while x < 720.0 {
+                click(&mut ev, x, 14.0);
+                x += 24.0;
+            }
+            frame(&mut st, ev);
+        }
+
+        // Grid of clicks over the whole body, including out-of-bounds, plus a
+        // scroll each row.
+        for gy in 0..15 {
+            let mut ev = Vec::new();
+            for gx in 0..13 {
+                click(&mut ev, gx as f32 * 72.0 - 20.0, 30.0 + gy as f32 * 48.0);
+            }
+            ev.push(Event::MouseWheel {
+                unit: MouseWheelUnit::Line,
+                delta: vec2(0.0, if gy % 2 == 0 { -3.0 } else { 3.0 }),
+                modifiers: Modifiers::default(),
+            });
+            frame(&mut st, ev);
+        }
+
+        // Loop-edge drag across the waveform strip.
+        {
+            let mut ev = Vec::new();
+            drag(&mut ev, Pos2::new(200.0, 120.0), (1..=12).map(|i| Pos2::new(200.0 + i as f32 * 28.0, 120.0)));
+            frame(&mut st, ev);
+        }
+
+        // Each matrix page.
+        for page in 0..4usize {
+            st.matrix_page = page;
+            frame(&mut st, vec![]);
+        }
+        st.matrix_page = 0;
+
+        // Each slot selected.
+        for slot in 0..6usize {
+            st.selected_slot = slot;
+            frame(&mut st, vec![]);
+        }
+
+        // Curves screen + a freehand draw on each of the nine curves.
+        st.curves_mode = true;
+        frame(&mut st, vec![]);
+        for c in 0..9usize {
+            st.selected_curve = c;
+            let mut ev = Vec::new();
+            drag(
+                &mut ev,
+                Pos2::new(120.0, 300.0),
+                (1..=20).map(|i| Pos2::new(120.0 + i as f32 * 15.0, 300.0 + (i as f32 * 0.5).sin() * 40.0)),
+            );
+            frame(&mut st, ev);
+        }
+        st.curves_mode = false;
+        frame(&mut st, vec![]);
+
+        // Interactions actually reached parameters, and gestures balanced.
+        let (b, s, e) = (
+            host.begins.load(Ordering::Relaxed),
+            host.sets.load(Ordering::Relaxed),
+            host.ends.load(Ordering::Relaxed),
+        );
+        assert!(s > 0, "no parameter writes were triggered by the input sweep");
+        assert_eq!(b, e, "unbalanced begin/end parameter gestures ({b} begins, {e} ends)");
+    }
 }

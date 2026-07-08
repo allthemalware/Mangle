@@ -18,6 +18,10 @@ pub struct Voice {
     pub pressure: f32,
     /// CLAP note-expression tuning, semitones (added to the note pitch).
     pub tuning: f32,
+    /// CLAP note-expression volume, a linear gain ratio (1.0 = unity).
+    pub expr_volume: f32,
+    /// CLAP note-expression pan, -1..1 (-1 hard left, +1 hard right).
+    pub expr_pan: f32,
     pub gate: bool,
     pub lanes: [Lane; 3],
     pub loop_lfos: [LfoState; 3],
@@ -41,6 +45,8 @@ impl Voice {
             voice_random: 0.0,
             pressure: 0.0,
             tuning: 0.0,
+            expr_volume: 1.0,
+            expr_pan: 0.0,
             gate: false,
             lanes: [Lane::new(seed), Lane::new(seed ^ 0x9E37), Lane::new(seed ^ 0x79B9)],
             loop_lfos: [LfoState::default(), LfoState::default(), LfoState::default()],
@@ -126,13 +132,17 @@ impl VoiceManager {
         v.voice_random = voice_random;
         v.pressure = 0.0;
         v.tuning = 0.0;
+        v.expr_volume = 1.0;
+        v.expr_pan = 0.0;
         v.gate = true;
         v.was_sounding = true;
         v.mod_offsets.clear();
         v.last_scan = [(0.0, 0.0); 3];
         v.stamp = stamp;
         for lane in v.lanes.iter_mut() {
-            lane.reset();
+            // soft_reset (not reset) so a stolen, still-sounding voice's grains
+            // fade out instead of clicking; a free voice has nothing to fade.
+            lane.soft_reset();
         }
         for lfo in v.loop_lfos.iter_mut() {
             *lfo = LfoState::default();

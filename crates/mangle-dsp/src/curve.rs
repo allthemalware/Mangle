@@ -92,6 +92,10 @@ impl Curve {
     }
 }
 
+/// Phase at which a one-shot envelope holds — the last curve sample point, so
+/// `sample()` returns the final drawn value (not the wrap-around to point 0).
+const ONE_SHOT_HOLD: f32 = (CURVE_LEN - 1) as f32 / CURVE_LEN as f32;
+
 /// Runtime parameters for one (stereo) LFO. Display units already resolved.
 #[derive(Clone, Copy, Debug)]
 pub struct LfoParams {
@@ -103,6 +107,10 @@ pub struct LfoParams {
     /// 0..1 slew limit; 0 = instant.
     pub lag: f32,
     pub gate: bool,
+    /// One-shot: run once to the end of the curve and hold the final value
+    /// instead of looping, turning the drawable curve into an MSEG envelope.
+    /// Retrigger (Trig / Gate-Sync) re-fires it.
+    pub one_shot: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -120,7 +128,12 @@ impl LfoState {
     /// Advance by `dt` seconds, return the lagged (L, R) pair in -1..1.
     pub fn tick(&mut self, curve: &Curve, p: &LfoParams, dt: f32) -> (f32, f32) {
         if p.gate {
-            self.running_phase = (self.running_phase + p.rate_hz * dt).rem_euclid(1.0);
+            let next = self.running_phase + p.rate_hz * dt;
+            self.running_phase = if p.one_shot {
+                next.min(ONE_SHOT_HOLD) // run once, then hold the final value
+            } else {
+                next.rem_euclid(1.0)
+            };
         }
         self.emit(curve, p, dt)
     }
@@ -135,7 +148,8 @@ impl LfoState {
         phase: f32,
         dt: f32,
     ) -> (f32, f32) {
-        self.running_phase = phase.rem_euclid(1.0);
+        let ph = phase.rem_euclid(1.0);
+        self.running_phase = if p.one_shot { ph.min(ONE_SHOT_HOLD) } else { ph };
         self.emit(curve, p, dt)
     }
 
@@ -252,7 +266,7 @@ mod tests {
     #[test]
     fn lfo_stereo_phase_offsets_channels() {
         let c = Curve::sine();
-        let p = LfoParams { rate_hz: 1.0, phase: 0.0, st_phase: 1.0, lag: 0.0, gate: true };
+        let p = LfoParams { rate_hz: 1.0, phase: 0.0, st_phase: 1.0, lag: 0.0, gate: true, one_shot: false };
         let mut s = LfoState::default();
         // After a quarter cycle, L ≈ sin(2π·0.25) = 1, R offset by half a
         // cycle ≈ sin(2π·0.75) = -1.
@@ -267,7 +281,7 @@ mod tests {
     #[test]
     fn transport_lock_pins_phase() {
         let c = Curve::sine();
-        let p = LfoParams { rate_hz: 3.7, phase: 0.0, st_phase: 0.0, lag: 0.0, gate: true };
+        let p = LfoParams { rate_hz: 3.7, phase: 0.0, st_phase: 0.0, lag: 0.0, gate: true, one_shot: false };
         let mut s = LfoState::default();
         let (a, _) = s.tick_transport(&c, &p, 0.25, 0.001);
         assert!(a > 0.99, "quarter-cycle sine should be ~1, got {a}");
@@ -281,9 +295,37 @@ mod tests {
     }
 
     #[test]
+    fn one_shot_holds_final_value_and_retriggers() {
+        let c = Curve::ramp(); // -1 at the start, +1 at the end
+        let p = LfoParams {
+            rate_hz: 2.0, phase: 0.0, st_phase: 0.0, lag: 0.0, gate: true, one_shot: true,
+        };
+        let mut s = LfoState::default();
+        // Run well past one full cycle: a wrapping LFO would be mid-ramp again,
+        // but one-shot must hold the ramp's end (+1).
+        let mut out = (0.0, 0.0);
+        for _ in 0..2000 {
+            out = s.tick(&c, &p, 0.001);
+        }
+        assert!(out.0 > 0.9, "one-shot should hold the ramp end (+1), got {}", out.0);
+        // Retrigger restarts the envelope at the beginning (-1).
+        s.trig();
+        let (a, _) = s.tick(&c, &p, 0.001);
+        assert!(a < -0.9, "after trig, one-shot should restart near the start (-1), got {a}");
+        // A wrapping LFO over the same time lands back near the start, not held.
+        let pw = LfoParams { one_shot: false, ..p };
+        let mut sw = LfoState::default();
+        let mut wout = (0.0, 0.0);
+        for _ in 0..2000 {
+            wout = sw.tick(&c, &pw, 0.001);
+        }
+        assert!(wout.0 < 0.5, "wrapping LFO should not be held at the end: {}", wout.0);
+    }
+
+    #[test]
     fn lag_slows_response() {
         let c = Curve::square();
-        let fast = LfoParams { rate_hz: 0.0, phase: 0.0, st_phase: 0.0, lag: 0.0, gate: true };
+        let fast = LfoParams { rate_hz: 0.0, phase: 0.0, st_phase: 0.0, lag: 0.0, gate: true, one_shot: false };
         let slow = LfoParams { lag: 1.0, ..fast };
         let mut sf = LfoState::default();
         let mut ss = LfoState::default();

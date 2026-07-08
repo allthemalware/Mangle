@@ -100,3 +100,21 @@ these first:
    RND, open CURVES and draw. Each maps to begin/set/end param gestures.
 5. Verify `assert_process_allocs` doesn't trip (it's the canary for any
    audio-thread allocation regressions).
+
+## Headless smoketest (no DAW needed)
+
+`bash tools/run-smoketest.sh` bundles `mangle.clap` and drives it through a
+minimal in-process CLAP host (`tools/smoketest.cpp`, CLAP headers vendored under
+`tools/clap/`). It covers the shell layer the `mangle-dsp` unit tests can't:
+factory/descriptor, the full 384-param table + `value_to_text`, note ports,
+note-on/off, note-expression Volume/Pan, the master filter (LP cut + a
+matrix→filter route), the `Loop Start = Loop End = 100%` clamp regression (would
+crash the audio thread pre-fix), state save/mutate/load roundtrip, and a
+null-transport pass. Wire it into CI next to `cargo test`.
+
+The **editor** has its own headless render test (`cargo test -p mangle`,
+`editor::gui_tests`): a bare `egui::Context` + stub `GuiContext` drive
+`draw_editor` across every screen (main, curves, each matrix page, each slot)
+while injecting clicks, drags, scrolls and out-of-bounds input, asserting no
+panic, finite geometry (no NaN rects), and balanced begin/end param gestures.
+No DAW or window required.

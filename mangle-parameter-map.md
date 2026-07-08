@@ -96,6 +96,7 @@ on individual voices. Snapshot rule applies to everything marked ⟲.
 | Skew ⟲     | -100–+100 %                            | 0 %                | lin  | A M PN    | Envelope tilt: -100 pluck attack, +100 reverse swell. |
 | Algo       | Nearest / Linear / Hermite / Sinc-8    | Linear             | enum | A S       | **[new]** Per-grain read interpolation, frozen at snapshot like everything else: zero-order hold (gritty) → linear → 4-pt Hermite → 8-tap windowed sinc (clean). Independent of Mode (it's *how* a grain reads, not *what paradigm* the engine runs). |
 | Mode       | Grains / Stretch / Cloud / Spectral    | Grains             | enum | A S       | **[new]** Synthesis paradigm for the engine (Clouds/Plaits-style). Append-only enum; state stores the step index so modes can grow. See §3a. |
+| Quant      | Off/Chrom/Oct/5th/Maj/Min/Pent/mPent   | Off                | enum | A S       | **[new]** Pitch scale-lock, applied to the composed pitch (Pitch + key-track + modulation) at snapshot. Snaps modulated/randomized pitch to scale degrees relative to the slot's root reading. Append-only enum. |
 
 ### 3a. Grain engine modes **[new]**
 
@@ -176,6 +177,7 @@ when Gate Sync is on.
 | St.Phase   | 0–100 %       | 0 %      | lin  | A M     | Phase offset between the L and R modulation channels. |
 | Lag        | 0–100 %       | 0 %      | lin  | A M     | Slew limiter on the output. |
 | Trig       | momentary     | —        | bool | A PN S  | Edge-triggered reset to Phase. Fired by note-on when the engine's Gate Sync is on. |
+| One-Shot   | off / on      | off      | bool | A S     | **[new]** Run the curve once and hold its final value instead of looping — the curve becomes a drawable MSEG envelope. Retrigger (Trig / Gate Sync) re-fires it. |
 
 ## 5. LFOs ×6 (global)
 
@@ -264,6 +266,27 @@ evaluate per voice; purely global rows evaluate once per tick.
 (Torsion gesture). Right-click a destination cell offers "pick by dragging a
 control" — the drag-to-assign flow from the manual.
 
+## 8b. Master filter (Fx)  **[new]**
+
+A resonant state-variable filter on the master output (Cytomic trapezoidal SVF,
+one instance per channel), inserted in the output chain **after stereo width,
+before Squeeze** (`stereo → filter → Squeeze → level`). Off by default, so it
+never changes the sound of an existing patch until switched on.
+
+| Param  | Range          | Default | Map  | Flags | Notes |
+|--------|----------------|---------|------|-------|-------|
+| On     | off / on       | off     | bool | A S   | Master gate for the filter. Off = fully bypassed (states cleared). |
+| Type   | LP/BP/HP/Notch | LP      | step | A S   | Response. Step index is append-only. |
+| Cutoff | 0–20 kHz       | 20 kHz  | cube | A M   | Corner frequency (cube taper). Clamped to `[20 Hz, 0.47·SR]`. Smoothed (~5 ms) and coefficients refreshed each ~64-sample control chunk. |
+| Reso   | 0–100 %        | 0 %     | lin  | A M   | Resonance; maps to `k = 2 − 1.96·reso`, kept short of self-oscillation. |
+
+Cutoff and Reso are `M`-flagged and are **mod-matrix destinations** (`Flt Cutoff`,
+`Flt Reso` — the two entries appended to the dest enum, DEST_COUNT 79 → 81). They
+are evaluated **per channel** in the output chain, so an LFO with St.Phase 50 % on
+Cutoff sweeps L and R divergently — the stereo split/invert/merge move. (Because
+the filter sits after the width stage, this is a per-block target, smoothed across
+control chunks.)
+
 ## 9. Curves (EDIT.CURVES screen)
 
 Nine curve objects: Loop 1–3, LFO 1–6. Each is `f32[256]` in -1..+1, linear
@@ -308,16 +331,18 @@ Stable `u32`: `id = (module << 16) | (instance << 8) | index`
 |--------|------|-----------|-------------|
 | Global   | 0x00 | 1  | 6  |
 | Macro    | 0x01 | 8  | 1  |
-| Grain    | 0x02 | 3  | 21 |
-| Loop LFO | 0x03 | 3  | 9  |
-| LFO      | 0x04 | 6  | 9  |
+| Grain    | 0x02 | 3  | 22 |
+| Loop LFO | 0x03 | 3  | 10 |
+| LFO      | 0x04 | 6  | 10 |
 | Drift    | 0x05 | 3  | 1  |
 | Noise    | 0x06 | 3  | 1  |
 | Slot     | 0x07 | 6  | 4  |
 | Matrix   | 0x08 | 32 (rows) | 6 (columns) |
+| Fx       | 0x09 | 1  | 4  |
 
-Total: 6 + 8 + 63 + 27 + 54 + 3 + 3 + 24 + 192 = **380 params**. IDs are
-never reused or renumbered; new params append within their module.
+Total: 6 + 8 + 66 + 30 + 60 + 3 + 3 + 24 + 192 + 4 = **396 params**. IDs are
+never reused or renumbered; new params append within their module, and new
+modules take the next free code (Fx = 0x09).
 
 ## 12. Init patch
 

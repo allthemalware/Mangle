@@ -6,8 +6,10 @@
 /// VoiceRandom  = 35 entries.
 pub const SOURCE_COUNT: u16 = 35;
 
-/// None · LFO {Gate,Phase,Rate,Lag} ×6 · Loop LFO ×3 · Grain ×3 ×14 = 79.
-pub const DEST_COUNT: u16 = 79;
+/// None · LFO {Gate,Phase,Rate,Lag} ×6 · Loop LFO ×3 · Grain ×3 ×14 · Fx ×2 = 81.
+/// Append-only: matrix Dest is an `IntParam` storing the plain index, so growing
+/// this only unlocks new indices — existing saved routings keep their meaning.
+pub const DEST_COUNT: u16 = 81;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ModSource {
@@ -113,12 +115,21 @@ pub const GRAIN_DESTS: [GrainDest; 14] = [
     GrainDest::Sample,
 ];
 
+/// Master-filter (Fx module) destinations. Append-only.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FxDest {
+    Cutoff,
+    Reso,
+}
+pub const FX_DESTS: [FxDest; 2] = [FxDest::Cutoff, FxDest::Reso];
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ModDest {
     None,
     Lfo(u8, LfoDest),
     LoopLfo(u8, LfoDest),
     Grain(u8, GrainDest),
+    Fx(FxDest),
 }
 
 pub fn dest_from_index(i: u16) -> ModDest {
@@ -137,6 +148,10 @@ pub fn dest_from_index(i: u16) -> ModDest {
     if i < 42 {
         return ModDest::Grain((i / 14) as u8, GRAIN_DESTS[(i % 14) as usize]);
     }
+    i -= 42;
+    if i < 2 {
+        return ModDest::Fx(FX_DESTS[i as usize]);
+    }
     ModDest::None
 }
 
@@ -148,12 +163,17 @@ fn grain_dest_pos(d: GrainDest) -> u16 {
     GRAIN_DESTS.iter().position(|&x| x == d).unwrap() as u16
 }
 
+fn fx_dest_pos(d: FxDest) -> u16 {
+    FX_DESTS.iter().position(|&x| x == d).unwrap() as u16
+}
+
 pub fn dest_to_index(d: ModDest) -> u16 {
     match d {
         ModDest::None => 0,
         ModDest::Lfo(n, sub) => 1 + n as u16 * 4 + lfo_dest_pos(sub),
         ModDest::LoopLfo(n, sub) => 25 + n as u16 * 4 + lfo_dest_pos(sub),
         ModDest::Grain(n, sub) => 37 + n as u16 * 14 + grain_dest_pos(sub),
+        ModDest::Fx(sub) => 79 + fx_dest_pos(sub),
     }
 }
 
@@ -173,6 +193,7 @@ pub fn dest_owner(d: ModDest) -> Owner {
         ModDest::Lfo(n, _) => Owner::Lfo(n),
         ModDest::LoopLfo(n, _) => Owner::LoopLfo(n),
         ModDest::Grain(n, _) => Owner::Grain(n),
+        ModDest::Fx(_) => Owner::Global, // master filter is global-scope
     }
 }
 
@@ -265,6 +286,7 @@ pub fn dest_name(i: u16) -> String {
         ModDest::Lfo(n, sub) => format!("LFO{} {:?}", n + 1, sub),
         ModDest::LoopLfo(n, sub) => format!("Loop{} {:?}", n + 1, sub),
         ModDest::Grain(n, sub) => format!("G{} {:?}", n + 1, sub),
+        ModDest::Fx(sub) => format!("Flt {:?}", sub),
     }
 }
 

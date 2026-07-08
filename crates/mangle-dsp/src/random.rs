@@ -19,8 +19,9 @@
 
 use crate::matrix::{self, ModDest, ModSource, Owner};
 use crate::params::{
-    pid, Module, ParamTable, Patch, GRAIN_LEVEL_IDX, GRAIN_PITCH_IDX, LFO_TRIG_IDX,
-    N_GRAIN_PARAMS, N_LFO_PARAMS, N_MATRIX_ROWS, SLOT_LOOP_END_IDX, SLOT_LOOP_START_IDX,
+    pid, Module, ParamTable, Patch, GRAIN_LEVEL_IDX, GRAIN_PITCH_IDX, GRAIN_QUANT_IDX,
+    LFO_ONESHOT_IDX, LFO_TRIG_IDX, N_GRAIN_PARAMS, N_LFO_PARAMS, N_MATRIX_ROWS,
+    SLOT_LOOP_END_IDX, SLOT_LOOP_START_IDX,
 };
 use crate::rng::Rng;
 
@@ -62,6 +63,7 @@ impl Default for GrainParamPool {
         let mut p = [true; N_GRAIN_PARAMS];
         p[GRAIN_LEVEL_IDX as usize] = false; // Torsion default: Level unchecked
         p[GRAIN_PITCH_IDX as usize] = false; // Torsion default: Pitch unchecked
+        p[GRAIN_QUANT_IDX as usize] = false; // scale lock is a deliberate tonal choice
         Self(p)
     }
 }
@@ -74,6 +76,7 @@ impl Default for LfoParamPool {
     fn default() -> Self {
         let mut p = [true; N_LFO_PARAMS];
         p[LFO_TRIG_IDX as usize] = false; // momentary; pointless to randomize
+        p[LFO_ONESHOT_IDX as usize] = false; // structural mode, not a value to scramble
         Self(p)
     }
 }
@@ -196,6 +199,7 @@ impl DestPool {
                     ModDest::Grain(_, sub) => {
                         self.grain[matrix::GRAIN_DESTS.iter().position(|&x| x == sub).unwrap()]
                     }
+                    ModDest::Fx(_) => false, // master filter isn't a RANDOM target
                 };
                 let unlocked = match matrix::dest_owner(d) {
                     Owner::Global => true,
@@ -257,6 +261,7 @@ impl RandomOptions {
                 !l.loop_points && (index == SLOT_LOOP_START_IDX || index == SLOT_LOOP_END_IDX)
             }
             Module::Matrix => false, // handled by randomize_matrix
+            Module::Fx => false,     // master filter is a deliberate choice, not scrambled
         }
     }
 }

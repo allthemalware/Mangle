@@ -18,6 +18,11 @@ use crate::spectral::SpectralState;
 /// engine). Oldest is stolen beyond this.
 pub const MAX_GRAINS: usize = 96;
 
+/// Length, in output samples, of the fade applied to a stolen voice's leftover
+/// grains so voice stealing doesn't click (~5.3 ms at 48 kHz, SR-independent
+/// enough for a declick).
+const STEAL_FADE: u32 = 256;
+
 /// Synthesis paradigm for a grain engine lane, chosen by the per-engine
 /// `Mode` parameter (`params::GRAIN_MODE_IDX`). All three Tier-1 modes share
 /// the grain snapshot/render path; they differ only in how each grain's read
@@ -56,6 +61,80 @@ impl GrainMode {
             2 => GrainMode::Cloud,
             3 => GrainMode::Spectral,
             _ => GrainMode::Granular,
+        }
+    }
+}
+
+/// Per-engine pitch quantization (scale lock), chosen by the `Quant` param.
+/// Applied post-modulation to the composed pitch at snapshot time, so modulated
+/// or randomized pitch lands on scale degrees instead of between them.
+/// Append-only: the step index is persisted as a plain integer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PitchQuant {
+    Off,
+    Chromatic,
+    Octave,
+    Fifth,
+    Major,
+    Minor,
+    Penta,
+    MinorPenta,
+}
+
+pub const QUANT_NAMES: [&str; 8] =
+    ["Off", "Chrom", "Oct", "5th", "Maj", "Min", "Pent", "mPent"];
+
+impl PitchQuant {
+    pub fn from_index(i: usize) -> Self {
+        match i {
+            1 => PitchQuant::Chromatic,
+            2 => PitchQuant::Octave,
+            3 => PitchQuant::Fifth,
+            4 => PitchQuant::Major,
+            5 => PitchQuant::Minor,
+            6 => PitchQuant::Penta,
+            7 => PitchQuant::MinorPenta,
+            _ => PitchQuant::Off,
+        }
+    }
+
+    /// Allowed semitone pitch-classes (mod 12), or empty for Off/Chromatic/Octave
+    /// which are handled directly.
+    fn classes(self) -> &'static [i32] {
+        match self {
+            PitchQuant::Fifth => &[0, 7],
+            PitchQuant::Major => &[0, 2, 4, 5, 7, 9, 11],
+            PitchQuant::Minor => &[0, 2, 3, 5, 7, 8, 10],
+            PitchQuant::Penta => &[0, 2, 4, 7, 9],
+            PitchQuant::MinorPenta => &[0, 3, 5, 7, 10],
+            _ => &[],
+        }
+    }
+}
+
+/// Snap a pitch offset in semitones to the selected scale (relative to 0 = the
+/// slot's root reading). Ties resolve toward the lower semitone.
+pub fn quantize_semitones(st: f32, q: PitchQuant) -> f32 {
+    match q {
+        PitchQuant::Off => st,
+        PitchQuant::Chromatic => st.round(),
+        PitchQuant::Octave => (st / 12.0).round() * 12.0,
+        _ => {
+            let classes = q.classes();
+            let base = st.round() as i32;
+            let mut best = st;
+            let mut best_d = f32::INFINITY;
+            // Search a full octave either side so wrap-arounds are covered.
+            for m in (base - 7)..=(base + 7) {
+                if classes.contains(&m.rem_euclid(12)) {
+                    let d = (m as f32 - st).abs();
+                    if d < best_d {
+                        best_d = d;
+                        best = m as f32;
+                    }
+                }
+            }
+            best
         }
     }
 }
@@ -107,6 +186,8 @@ pub struct LaneParams {
     pub algo: Algo,
     /// Synthesis mode for this lane (Granular / Stretch / Cloud).
     pub mode: GrainMode,
+    /// Pitch quantization (scale lock), applied to the composed pitch at spawn.
+    pub quant: PitchQuant,
 }
 
 impl Default for LaneParams {
@@ -134,6 +215,7 @@ impl Default for LaneParams {
             pos_pitch: false,
             algo: Algo::Linear,
             mode: GrainMode::Granular,
+            quant: PitchQuant::Off,
         }
     }
 }
@@ -160,7 +242,10 @@ pub(crate) fn resolve_window(p: &LaneParams, bank: &SampleBank) -> Option<(usize
     let slot_idx = loaded[pick];
     let slot = bank.slots[slot_idx].as_ref().unwrap();
 
-    let ls = slot.loop_start.min(slot.len());
+    // Clamp `ls` below `len` so `ls + 1 <= len`; a slot whose loop_start reaches
+    // len (Loop Start = Loop End = 100%) would otherwise make the clamp below
+    // `clamp(len + 1, len)`, which panics (min > max) on the audio thread.
+    let ls = slot.loop_start.min(slot.len().saturating_sub(1));
     let le = slot.loop_end.clamp(ls + 1, slot.len());
     let mid = (ls + le) as f32 * 0.5;
     let half = (le - ls) as f32 * 0.5 * p.loop_size.clamp(0.0, 2.0);
@@ -190,6 +275,12 @@ fn scan_offset(p: &LaneParams, scan: (f32, f32), channel: u8) -> f32 {
 pub struct Lane {
     emitters: [Emitter; 2],
     grains: Vec<ActiveGrain>,
+    /// Grains left over from a stolen voice, ringing out under a short fade so
+    /// the steal doesn't click. Kept separate from `grains` so the new note
+    /// spawns into a clean pool.
+    fading: Vec<ActiveGrain>,
+    /// Output samples elapsed in the current steal fade.
+    fade_age: u32,
     scratch: Vec<(u8, usize)>,
     rng: Rng,
     /// Stretch-mode read playhead per channel, as normalized loop-window
@@ -210,6 +301,8 @@ impl Lane {
         Self {
             emitters: [Emitter::default(), Emitter::default()],
             grains: Vec::with_capacity(MAX_GRAINS),
+            fading: Vec::with_capacity(MAX_GRAINS),
+            fade_age: 0,
             scratch: Vec::with_capacity(64),
             rng: Rng::new(seed),
             playheads: [0.0; 2],
@@ -223,21 +316,101 @@ impl Lane {
         self.grains.len()
     }
 
-    /// True while the lane still has sound to emit: live grains, or a Spectral
-    /// overlap-add release tail. The voice manager and shell use this so a
-    /// released Spectral voice rings out instead of being cut.
+    /// True while the lane still has sound to emit: live grains, a steal
+    /// fade-out tail, or a Spectral overlap-add release tail. The voice manager
+    /// and shell use this so a released Spectral voice rings out instead of
+    /// being cut.
     pub fn is_ringing(&self) -> bool {
-        !self.grains.is_empty() || self.spectral.ringing()
+        !self.grains.is_empty() || !self.fading.is_empty() || self.spectral.ringing()
     }
 
-    /// Hard-stop all grains (voice reset).
+    /// Hard-stop everything (Choke / panic): no fade, immediate silence.
     pub fn reset(&mut self) {
         self.grains.clear();
+        self.fading.clear();
+        self.fade_age = 0;
         self.emitters = [Emitter::default(), Emitter::default()];
         self.playheads = [0.0; 2];
         self.pos_phase = [f64::NAN; 2];
         self.pos_vel = [0.0; 2];
         self.spectral.reset();
+    }
+
+    /// Reset for voice reuse, but let any live grains ring out under a short
+    /// fade instead of a hard clear — removes the click when a still-sounding
+    /// voice is stolen. Emitters/playheads reset immediately so the new note
+    /// starts clean; the leftover grains fade in `fading` over `STEAL_FADE`.
+    pub fn soft_reset(&mut self) {
+        if !self.grains.is_empty() {
+            // Move the live grains into the fade pool (discarding any older
+            // in-progress tail — it is older and quieter) and restart the fade.
+            core::mem::swap(&mut self.grains, &mut self.fading);
+            self.grains.clear();
+            self.fade_age = 0;
+        }
+        self.emitters = [Emitter::default(), Emitter::default()];
+        self.playheads = [0.0; 2];
+        self.pos_phase = [f64::NAN; 2];
+        self.pos_vel = [0.0; 2];
+        self.spectral.reset();
+    }
+
+    /// Render (and advance) the steal fade-out tail. Runs before the main path
+    /// so it plays out and clears regardless of the new note's mode.
+    fn render_fading(&mut self, bank: &SampleBank, out_l: &mut [f32], out_r: &mut [f32], block: usize) {
+        if self.fading.is_empty() {
+            self.fade_age = 0;
+            return;
+        }
+        for g in self.fading.iter_mut() {
+            let slot = match bank.slots[g.snap.slot].as_ref() {
+                Some(s) => s,
+                None => {
+                    g.age = g.snap.length;
+                    continue;
+                }
+            };
+            let data = &slot.data[g.snap.channel as usize];
+            let own_gain = (g.snap.pan * core::f32::consts::FRAC_PI_2).cos();
+            let swap_gain = (g.snap.pan * core::f32::consts::FRAC_PI_2).sin();
+            let (peak, exponent) = grain_env_coeffs(g.snap.shape, g.snap.skew);
+            let mut n = 0usize;
+            if g.delay as usize >= block {
+                g.delay -= block as u32;
+                continue;
+            }
+            n += g.delay as usize;
+            g.delay = 0;
+            while n < block && g.age < g.snap.length {
+                // Linear steal-fade: 1 → 0 over STEAL_FADE samples.
+                let fade = 1.0 - (self.fade_age + n as u32) as f32 / STEAL_FADE as f32;
+                if fade <= 0.0 {
+                    break;
+                }
+                let t = g.age as f32 / g.snap.length as f32;
+                let env = grain_envelope_at(t, peak, exponent);
+                let s = read(data, g.pos, g.snap.wstart, g.snap.wlen, g.snap.algo)
+                    * env
+                    * g.snap.level
+                    * fade;
+                if g.snap.channel == 0 {
+                    out_l[n] += s * own_gain;
+                    out_r[n] += s * swap_gain;
+                } else {
+                    out_r[n] += s * own_gain;
+                    out_l[n] += s * swap_gain;
+                }
+                g.pos += g.snap.increment;
+                g.age += 1;
+                n += 1;
+            }
+        }
+        self.fading.retain(|g| g.age < g.snap.length);
+        self.fade_age = self.fade_age.saturating_add(block as u32);
+        if self.fade_age >= STEAL_FADE {
+            self.fading.clear();
+            self.fade_age = 0;
+        }
     }
 
     /// Render `block` samples additively into `out_l` / `out_r`.
@@ -260,6 +433,10 @@ impl Lane {
         out_r: &mut [f32],
         block: usize,
     ) {
+        // Ring out any stolen-voice fade tail first, so it declicks the steal
+        // regardless of the new note's mode, mixing additively under the note.
+        self.render_fading(bank, out_l, out_r, block);
+
         // Spectral mode bypasses the grain pool entirely (Mode is not matrix-
         // modulated, so both channels agree). Drop any grains left over from a
         // previous mode, then run the phase vocoder.
@@ -384,7 +561,10 @@ impl Lane {
         };
         let slot = bank.slots[slot_idx].as_ref().unwrap();
 
-        let pitch = p.pitch_st + p.key_track * (p.note - slot.root_note as f32);
+        let pitch = quantize_semitones(
+            p.pitch_st + p.key_track * (p.note - slot.root_note as f32),
+            p.quant,
+        );
         let pitch_ratio = 2.0f64.powf(pitch as f64 / 12.0);
         let dir = p.direction.clamp(-1.0, 1.0) as f64;
         // Pos>Pitch (tape/vinyl drag): grain read speed follows the scan-position
@@ -1134,5 +1314,97 @@ mod tests {
         }
         let f = dominant_freq(&l, sr);
         assert!((f - 2000.0).abs() < 150.0, "Pos>Pitch tape-drag freq {f} Hz, expected ~2000");
+    }
+
+    #[test]
+    fn voice_steal_fades_instead_of_clicking() {
+        let sr = 48_000.0;
+        let mut bank = SampleBank::new();
+        bank.slots[0] = Some(SampleSlot::test_tone(sr));
+        let p = LaneParams {
+            rate_hz: 200.0,
+            linked: false,
+            length_val: 200.0,
+            loop_on: false,
+            ..Default::default()
+        };
+        let pp = [p, p];
+        let mut lane = Lane::new(5);
+        let mut l = vec![0.0f32; 512];
+        let mut r = vec![0.0f32; 512];
+        // Build up active grains.
+        for _ in 0..8 {
+            l.iter_mut().for_each(|v| *v = 0.0);
+            r.iter_mut().for_each(|v| *v = 0.0);
+            lane.process(&pp, &bank, (0.0, 0.0), sr, &mut l, &mut r, 512);
+        }
+        assert!(lane.active_grains() > 0, "no grains to steal");
+
+        // Steal: soft_reset moves live grains into the fade pool.
+        lane.soft_reset();
+        assert_eq!(lane.active_grains(), 0, "new note's pool must start empty");
+        assert!(lane.is_ringing(), "steal tail should keep the lane ringing");
+
+        // Render the fade with the gate OFF (no new grains): the tail must sound
+        // rather than cutting to instant silence (the click this fix removes).
+        let gate_off = LaneParams { rate_hz: 0.0, gate: false, ..p };
+        let mut fl = vec![0.0f32; 256];
+        let mut fr = vec![0.0f32; 256];
+        lane.process(&[gate_off, gate_off], &bank, (0.0, 0.0), sr, &mut fl, &mut fr, 256);
+        let tail: f64 = fl.iter().chain(fr.iter()).map(|v| (v * v) as f64).sum();
+        assert!(tail > 0.0, "steal produced instant silence (click), not a fade");
+        for v in fl.iter().chain(fr.iter()) {
+            assert!(v.is_finite());
+        }
+
+        // The fade spans ~256 samples; a couple more blocks and it is fully gone.
+        for _ in 0..3 {
+            fl.iter_mut().for_each(|v| *v = 0.0);
+            fr.iter_mut().for_each(|v| *v = 0.0);
+            lane.process(&[gate_off, gate_off], &bank, (0.0, 0.0), sr, &mut fl, &mut fr, 256);
+        }
+        assert!(!lane.is_ringing(), "steal tail should have faded out");
+    }
+
+    #[test]
+    fn pitch_quantize_snaps_to_scales() {
+        // Off passes through; Chromatic rounds to the nearest semitone.
+        assert_eq!(quantize_semitones(3.7, PitchQuant::Off), 3.7);
+        assert_eq!(quantize_semitones(3.7, PitchQuant::Chromatic), 4.0);
+        // Octaves snap to multiples of 12.
+        assert_eq!(quantize_semitones(5.0, PitchQuant::Octave), 0.0);
+        assert_eq!(quantize_semitones(7.0, PitchQuant::Octave), 12.0);
+        // Major scale: 3 (D#) is off-scale → nearest is 2 (D) or 4 (E); tie → lower.
+        assert_eq!(quantize_semitones(3.0, PitchQuant::Major), 2.0);
+        assert_eq!(quantize_semitones(5.9, PitchQuant::Major), 5.0); // ~F stays F
+        // Every quantized value must itself be on the scale.
+        for q in [PitchQuant::Fifth, PitchQuant::Major, PitchQuant::Minor, PitchQuant::Penta, PitchQuant::MinorPenta] {
+            for i in -240..=240 {
+                let st = i as f32 / 10.0;
+                let out = quantize_semitones(st, q);
+                let pc = (out.round() as i32).rem_euclid(12);
+                assert!(q.classes().contains(&pc), "{q:?}: {st} -> {out} (pc {pc} off-scale)");
+                assert!((out - st).abs() <= 6.0, "{q:?}: snapped too far {st} -> {out}");
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_window_survives_degenerate_loop() {
+        // Loop Start = Loop End = 100% resolves loop_start to len; the clamp in
+        // resolve_window must not panic (regression: clamp(len + 1, len)).
+        let sr = 48_000.0;
+        let mut bank = SampleBank::new();
+        let mut slot = SampleSlot::test_tone(sr);
+        let len = slot.len();
+        slot.loop_start = len; // degenerate: start at the very end
+        slot.loop_end = len;
+        bank.slots[0] = Some(slot);
+        let p = LaneParams { loop_on: false, ..Default::default() };
+        let got = resolve_window(&p, &bank);
+        assert!(got.is_some(), "resolve_window returned None for a loaded slot");
+        let (_, wstart, wlen) = got.unwrap();
+        assert!(wstart + wlen <= len, "window {wstart}+{wlen} exceeds slot len {len}");
+        assert!(wlen >= 1, "window length must be positive");
     }
 }

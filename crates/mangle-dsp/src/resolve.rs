@@ -10,7 +10,7 @@
 //! `lane_params`/`lfo` resolvers in build step 5.
 
 use crate::curve::LfoParams;
-use crate::engine::{GrainMode, LaneParams};
+use crate::engine::{GrainMode, LaneParams, PitchQuant};
 use crate::params::{pid, Map, Module, ParamTable, Patch, DIV_BEATS};
 use crate::sample::Algo;
 
@@ -66,6 +66,7 @@ pub fn lane_params(
         pos_pitch: d(15) >= 0.5,
         algo: Algo::from_index(d(19) as usize),
         mode: GrainMode::from_index(d(20) as usize),
+        quant: PitchQuant::from_index(d(21) as usize),
     };
     (p, d(13) >= 0.5)
 }
@@ -91,6 +92,7 @@ pub fn lfo_params(
         st_phase: d(6) / 100.0,
         lag: d(7) / 100.0,
         gate: d(0) >= 0.5,
+        one_shot: d(9) >= 0.5,
     };
     (p, d(1) >= 0.5)
 }
@@ -122,6 +124,28 @@ pub fn global_out(patch: &Patch, table: &ParamTable) -> GlobalOut {
         squeeze: d(3) >= 0.5,
         level: 10.0f32.powf(d(4) / 20.0),
         voices: d(5) as usize,
+    }
+}
+
+/// Master filter settings (Module::Fx), resolved once per block from the base
+/// patch. Applied in the output chain after the grain sum, before Squeeze.
+#[derive(Clone, Copy, Debug)]
+pub struct FilterOut {
+    pub on: bool,
+    pub ftype: crate::filter::FilterType,
+    /// Cutoff in Hz.
+    pub cutoff: f32,
+    /// Resonance 0..1.
+    pub reso: f32,
+}
+
+pub fn filter_out(patch: &Patch, table: &ParamTable) -> FilterOut {
+    let d = |idx: u8| disp(patch, table, Module::Fx, 0, idx);
+    FilterOut {
+        on: d(0) >= 0.5,
+        ftype: crate::filter::FilterType::from_index(d(1) as u32),
+        cutoff: d(2),
+        reso: (d(3) / 100.0).clamp(0.0, 1.0),
     }
 }
 

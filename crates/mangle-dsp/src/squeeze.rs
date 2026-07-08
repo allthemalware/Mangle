@@ -51,7 +51,11 @@ impl Squeeze {
     /// Process a stereo block in place.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
         for (a, b) in l.iter_mut().zip(r.iter_mut()) {
+            // A single non-finite input would otherwise poison `self.env`
+            // forever (NaN compares false, so neither the gate nor the denormal
+            // flush ever recovers it): treat it as silence for the detector.
             let x = a.abs().max(b.abs());
+            let x = if x.is_finite() { x } else { 0.0 };
             self.env += (x - self.env) * self.env_coef;
             if self.env < 1e-20 {
                 self.env = 0.0; // flush denormals
@@ -143,6 +147,23 @@ mod tests {
         sq.process(&mut l, &mut r);
         assert!(r.iter().all(|v| *v == 0.0), "silent channel must stay silent");
         assert!(rms(&l[48_000..]) > 0.05, "left should still be leveled up");
+    }
+
+    #[test]
+    fn nan_input_does_not_poison_the_leveler() {
+        let sr = 48_000.0;
+        let mut sq = Squeeze::new(sr);
+        // One NaN block, then a clean quiet signal that should still be boosted.
+        let mut nl = vec![f32::NAN; 64];
+        let mut nr = vec![f32::NAN; 64];
+        sq.process(&mut nl, &mut nr);
+        let mut l = sine(0.02, 96_000, sr);
+        let mut r = l.clone();
+        let in_rms = rms(&l);
+        sq.process(&mut l, &mut r);
+        let out_rms = rms(&l[48_000..]);
+        assert!(out_rms.is_finite(), "leveler stuck at NaN after a NaN input");
+        assert!(out_rms > in_rms * 3.0, "boost did not resume after NaN: {in_rms} → {out_rms}");
     }
 
     #[test]

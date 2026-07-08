@@ -17,6 +17,8 @@ pub enum Module {
     Noise = 0x06,
     Slot = 0x07,
     Matrix = 0x08,
+    /// Master output filter (append-only module — see parameter map §Fx).
+    Fx = 0x09,
 }
 
 pub const fn pid(m: Module, instance: u8, index: u8) -> u32 {
@@ -179,13 +181,18 @@ fn grain_specs() -> Vec<Spec> {
         Spec("Skew", "%", Map::Lin { min: -100.0, max: 100.0 }, 0.0, A_M_PN, true), // 18
         Spec("Algo", "", Map::Steps { count: 4 }, 1.0, A_S, false), // 19 [new] read/stretch algorithm
         Spec("Mode", "", Map::Steps { count: N_GRAIN_MODES }, 0.0, A_S, false), // 20 [new] synthesis mode
+        Spec("Quant", "", Map::Steps { count: N_PITCH_QUANT }, 0.0, A_S, false), // 21 [new] pitch scale lock
     ]
 }
 pub const GRAIN_LEVEL_IDX: u8 = 8;
 pub const GRAIN_PITCH_IDX: u8 = 14;
 pub const GRAIN_ALGO_IDX: u8 = 19;
 pub const GRAIN_MODE_IDX: u8 = 20;
-pub const N_GRAIN_PARAMS: usize = 21;
+pub const GRAIN_QUANT_IDX: u8 = 21;
+pub const N_GRAIN_PARAMS: usize = 22;
+
+/// Pitch-quantize scales (`engine::PitchQuant`). Append-only.
+pub const N_PITCH_QUANT: u16 = 8;
 
 /// Synthesis modes a grain engine can run (`Mode` param). Append-only: the
 /// step index is persisted by the host as a plain integer, so new modes may
@@ -206,10 +213,12 @@ fn lfo_specs(loop_lfo: bool) -> Vec<Spec> {
         Spec("St.Phase", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M, false), // 6
         Spec("Lag", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M, false), // 7
         Spec("Trig", "", Map::Bool, 0.0, A | PN | S, false),   // 8 (edge-triggered)
+        Spec("One-Shot", "", Map::Bool, 0.0, A_S, false),      // 9 [new] MSEG envelope mode
     ]
 }
 pub const LFO_TRIG_IDX: u8 = 8;
-pub const N_LFO_PARAMS: usize = 9;
+pub const LFO_ONESHOT_IDX: u8 = 9;
+pub const N_LFO_PARAMS: usize = 10;
 
 fn stphase_specs() -> Vec<Spec> {
     vec![Spec("St.Phase", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M, false)]
@@ -225,6 +234,20 @@ fn slot_specs() -> Vec<Spec> {
 }
 pub const SLOT_LOOP_START_IDX: u8 = 1;
 pub const SLOT_LOOP_END_IDX: u8 = 2;
+
+/// Master filter (Module::Fx). Off by default so appending it does not change
+/// the sound of any existing patch; Cutoff defaults fully open (transparent
+/// when first switched on). Cutoff/Reso are modulatable (host + future matrix).
+fn fx_specs() -> Vec<Spec> {
+    vec![
+        Spec("On", "", Map::Bool, 0.0, A_S, false),                              // 0
+        Spec("Type", "", Map::Steps { count: N_FILTER_TYPES }, 0.0, A_S, false), // 1 LP/BP/HP/Notch
+        Spec("Cutoff", "Hz", Map::Cube { max: 20000.0 }, 20000.0, A_M, false),   // 2
+        Spec("Reso", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M, false),   // 3
+    ]
+}
+/// Filter responses (`crate::filter::FilterType`). Append-only.
+pub const N_FILTER_TYPES: u16 = 4;
 
 fn matrix_specs() -> Vec<Spec> {
     use crate::matrix::{DEST_COUNT, SOURCE_COUNT};
@@ -267,7 +290,7 @@ fn push(out: &mut Vec<ParamInfo>, module: Module, instance: u8, prefix: &str, sp
 }
 
 pub fn build_param_table() -> Vec<ParamInfo> {
-    let mut t = Vec::with_capacity(380);
+    let mut t = Vec::with_capacity(384);
     push(&mut t, Module::Global, 0, "", global_specs());
     for m in 0..8u8 {
         let spec = vec![Spec(
@@ -305,6 +328,7 @@ pub fn build_param_table() -> Vec<ParamInfo> {
     for r in 0..N_MATRIX_ROWS {
         push(&mut t, Module::Matrix, r, &format!("Mod {:02}", r), matrix_specs());
     }
+    push(&mut t, Module::Fx, 0, "Filter", fx_specs());
     t
 }
 
@@ -375,10 +399,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn table_has_380_params() {
-        // 6 global + 8 macro + 3×21 grain + 3×9 loop-lfo + 6×9 lfo
-        // + 3 drift + 3 noise + 6×4 slot + 32×6 matrix = 380.
-        assert_eq!(ParamTable::new().len(), 380);
+    fn table_has_396_params() {
+        // 6 global + 8 macro + 3×22 grain + 3×10 loop-lfo + 6×10 lfo
+        // + 3 drift + 3 noise + 6×4 slot + 32×6 matrix + 4 fx = 396.
+        assert_eq!(ParamTable::new().len(), 396);
     }
 
     #[test]

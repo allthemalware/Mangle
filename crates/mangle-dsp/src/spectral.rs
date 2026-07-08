@@ -21,7 +21,7 @@
 
 use std::sync::OnceLock;
 
-use crate::engine::{resolve_window, LaneParams};
+use crate::engine::{quantize_semitones, resolve_window, LaneParams};
 use crate::fft::Fft;
 use crate::rng::Rng;
 use crate::sample::{read, SampleBank};
@@ -207,7 +207,10 @@ impl<'a> ChanCtx<'a> {
         match resolve_window(p, bank) {
             Some((slot_idx, wstart, wlen)) => {
                 let slot = bank.slots[slot_idx].as_ref().unwrap();
-                let pitch = p.pitch_st + p.key_track * (p.note - slot.root_note as f32);
+                let pitch = quantize_semitones(
+                    p.pitch_st + p.key_track * (p.note - slot.root_note as f32),
+                    p.quant,
+                );
                 let r = 2.0f32.powf(pitch / 12.0).clamp(0.03125, 32.0);
                 ChanCtx {
                     win: if p.gate { Some((wstart, wlen)) } else { None },

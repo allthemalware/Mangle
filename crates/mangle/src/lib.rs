@@ -11,7 +11,7 @@
 //! Position lands as a window shift, Loop LFO feedback uses a one-block delay,
 //! Macros (with per-note offsets) feed the matrix, and the pressure / tuning
 //! note expressions drive the Pressure source and the pitch path. Output chain:
-//! stereo width → Squeeze → master level → env-follower feed.
+//! stereo width → master filter → Squeeze → master level → env-follower feed.
 //!
 //! Remaining simplification: per-channel modulation of an LFO's *rate* resolves
 //! from the left channel (stereo LFOs still split via St.Phase).
@@ -29,15 +29,19 @@ use std::sync::{Arc, RwLock};
 use mangle_dsp::curve::Curve;
 use mangle_dsp::matrix;
 use mangle_dsp::modengine::{
-    apply_global, apply_voice, decode_matrix, fill_voice_sources, DecodedRow, GlobalMod,
-    SourceValues, VoiceSourceInputs,
+    apply_global, apply_voice, decode_matrix, fill_voice_sources, modulated_filter, DecodedRow,
+    GlobalMod, SourceValues, VoiceSourceInputs,
 };
 use mangle_dsp::params::{self as mp, flags, Map, Module, ParamInfo, ParamTable, Patch};
 use mangle_dsp::resolve;
 use mangle_dsp::rng::Rng;
-use mangle_dsp::engine::MODE_NAMES;
+use mangle_dsp::engine::{MODE_NAMES, QUANT_NAMES};
+use mangle_dsp::filter::Svf;
 use mangle_dsp::sample::{SampleBank, SampleSlot, ALGO_NAMES};
 use mangle_dsp::squeeze::Squeeze;
+
+/// Master-filter response names (Fx `Type` param), display order = step index.
+const FILTER_TYPE_NAMES: [&str; 4] = ["LP", "BP", "HP", "Notch"];
 use mangle_dsp::state::{self, ExtraState};
 use mangle_dsp::state::SlotRef;
 use mangle_dsp::voice::VoiceManager;
@@ -46,6 +50,7 @@ mod editor;
 
 /// Per-slot display data for the waveform strip (peaks of the mono mix).
 /// GUI-only; never serialized.
+#[derive(Clone)]
 pub struct WaveSummary {
     pub peaks: Vec<(f32, f32)>,
     pub len_samples: usize,
@@ -58,6 +63,9 @@ pub struct PendingLoad {
     pub sample: Box<SampleSlot>,
     pub path: String,
     pub content_hash: u64,
+    /// Waveform summary, computed on the GUI thread at enqueue time so the
+    /// audio-thread drain stays allocation- and lock-free.
+    pub summary: WaveSummary,
 }
 
 // ------------------------------------------------------------- params ---
@@ -116,6 +124,7 @@ fn group_name(info: &ParamInfo) -> String {
         Module::Noise => "Noise".to_string(),
         Module::Slot => format!("Slot {}", info.instance + 1),
         Module::Matrix => "Matrix".to_string(),
+        Module::Fx => "Filter".to_string(),
     }
 }
 
@@ -138,6 +147,10 @@ fn int_formatter(info: &ParamInfo) -> Arc<dyn Fn(i32) -> String + Send + Sync> {
             let last = MODE_NAMES.len() as i32 - 1;
             Arc::new(move |v| MODE_NAMES[v.clamp(0, last) as usize].to_string())
         }
+        (Module::Grain, mp::GRAIN_QUANT_IDX) => {
+            let last = QUANT_NAMES.len() as i32 - 1;
+            Arc::new(move |v| QUANT_NAMES[v.clamp(0, last) as usize].to_string())
+        }
         (Module::Matrix, 0) | (Module::Matrix, 5) => {
             Arc::new(|v| matrix::source_name(v.max(0) as u16))
         }
@@ -145,6 +158,7 @@ fn int_formatter(info: &ParamInfo) -> Arc<dyn Fn(i32) -> String + Send + Sync> {
             Arc::new(|v| matrix::dest_name(v.max(0) as u16))
         }
         (Module::Slot, 0) => Arc::new(note_name),
+        (Module::Fx, 1) => Arc::new(|v| FILTER_TYPE_NAMES[v.clamp(0, 3) as usize].to_string()),
         _ => Arc::new(|v| v.to_string()),
     }
 }
@@ -326,6 +340,19 @@ pub struct Mangle {
     /// MonoAutomation overrides for poly-modulatable params.
     mono_overrides: Vec<(u32, f32)>,
     squeeze: Squeeze,
+    /// Master output filter, one SVF per channel (Module::Fx). Runs after the
+    /// grain sum, before Squeeze.
+    filter: [Svf; 2],
+    /// Smoothed filter cutoff (Hz) per channel, ramped toward the (matrix-
+    /// modulated, per-channel) target across control chunks so sweeps don't
+    /// zipper. Two values so stereo filter modulation diverges L/R.
+    filt_cutoff: [f32; 2],
+    /// Smoothed master Level / Stereo width. The map's ~5 ms smoothing contract
+    /// covers these continuous, non-grain params; applying the resolved value
+    /// per block unramped would zipper on automation.
+    cur_level: f32,
+    cur_stereo: f32,
+    smooth_coef: f32,
     /// Last seen `extra` generation (curve sync).
     seen_gen: u64,
     rng: Rng,
@@ -358,6 +385,11 @@ impl Default for Mangle {
             n_rows: 0,
             mono_overrides: Vec::with_capacity(256),
             squeeze: Squeeze::new(48_000.0),
+            filter: [Svf::default(); 2],
+            filt_cutoff: [20_000.0; 2],
+            cur_level: 1.0,
+            cur_stereo: 1.0,
+            smooth_coef: 1.0 - (-1.0f32 / (0.005 * 48_000.0)).exp(),
             seen_gen: 0,
             rng: Rng::new(0x564F_5944), // "VOYD"
             sample_rate: 48_000.0,
@@ -367,7 +399,7 @@ impl Default for Mangle {
 }
 
 /// Build a min/max peak summary of a slot's mono mix for the GUI.
-fn summarize(slot: &SampleSlot) -> WaveSummary {
+pub(crate) fn summarize(slot: &SampleSlot) -> WaveSummary {
     const BUCKETS: usize = 1024;
     let n = slot.len();
     let mut peaks = Vec::with_capacity(BUCKETS);
@@ -464,6 +496,28 @@ impl Mangle {
                     }
                 }
             }
+            NoteEvent::PolyVolume { voice_id, note, gain, .. } => {
+                for v in self.vm.voices.iter_mut() {
+                    let hit = match voice_id {
+                        Some(id) => v.note_id == id,
+                        None => v.note == note,
+                    };
+                    if hit {
+                        v.expr_volume = gain.max(0.0);
+                    }
+                }
+            }
+            NoteEvent::PolyPan { voice_id, note, pan, .. } => {
+                for v in self.vm.voices.iter_mut() {
+                    let hit = match voice_id {
+                        Some(id) => v.note_id == id,
+                        None => v.note == note,
+                    };
+                    if hit {
+                        v.expr_pan = pan.clamp(-1.0, 1.0);
+                    }
+                }
+            }
             NoteEvent::PolyModulation { voice_id, poly_modulation_id, normalized_offset, .. } => {
                 if let Some(v) = self.vm.voices.iter_mut().find(|v| v.note_id == voice_id) {
                     v.set_mod_offset(poly_modulation_id, normalized_offset);
@@ -524,6 +578,10 @@ impl Plugin for Mangle {
             .sr_bits
             .store(self.sample_rate.to_bits(), Ordering::Release);
         self.squeeze = Squeeze::new(self.sample_rate);
+        for f in self.filter.iter_mut() {
+            f.clear();
+        }
+        self.smooth_coef = 1.0 - (-1.0f32 / (0.005 * self.sample_rate)).exp();
         mangle_dsp::sample::warm_tables(); // no lazy alloc on the audio thread
         mangle_dsp::spectral::warm(); // pre-build the spectral FFT plan + window
 
@@ -630,26 +688,15 @@ impl Plugin for Mangle {
             }
         }
 
-        // Drain any GUI-side sample loads (drag-drop / dialog). The decode
-        // and resample already happened on the GUI thread; here we only
-        // swap the boxed sample into the bank. try_lock keeps it RT-safe —
-        // if the GUI holds the lock we just pick them up next block.
+        // Drain any GUI-side sample loads (drag-drop / dialog). The decode,
+        // resample, waveform summary, and slot-ref/extra bookkeeping all
+        // happened on the GUI thread; here we only swap the boxed sample into
+        // the bank — a pointer move, no allocation or lock. try_lock keeps it
+        // RT-safe: if the GUI holds the queue lock we pick them up next block.
         if let Ok(mut pending) = self.params.pending_loads.try_lock() {
-            if !pending.is_empty() {
-                let mut refs: Vec<(usize, String, u64)> = Vec::new();
-                for p in pending.drain(..) {
-                    let i = p.slot.min(5);
-                    self.bank.slots[i] = Some(*p.sample);
-                    self.refresh_waveform(i);
-                    refs.push((i, p.path, p.content_hash));
-                }
-                drop(pending);
-                if let Ok(mut st) = self.params.extra.write() {
-                    for (i, path, hash) in refs {
-                        st.slot_refs[i] = Some(SlotRef { path, content_hash: hash });
-                    }
-                }
-                self.params.extra_gen.fetch_add(1, Ordering::Release);
+            for p in pending.drain(..) {
+                let i = p.slot.min(5);
+                self.bank.slots[i] = Some(*p.sample);
             }
         }
 
@@ -701,9 +748,14 @@ impl Plugin for Mangle {
                 let st = resolve::slot_settings(&self.base, &self.params.table, s);
                 let len = slot.len();
                 slot.root_note = st.root_note;
-                slot.loop_start = (st.loop_start * len as f32) as usize;
-                slot.loop_end =
-                    ((st.loop_end * len as f32) as usize).clamp(slot.loop_start + 1, len);
+                if len > 0 {
+                    // Clamp loop_start below `len` so `loop_start + 1 <= len` holds;
+                    // otherwise Loop Start = Loop End = 100% makes the clamp below
+                    // `clamp(len + 1, len)`, which panics (min > max) on the audio thread.
+                    let ls = ((st.loop_start * len as f32) as usize).min(len - 1);
+                    slot.loop_start = ls;
+                    slot.loop_end = ((st.loop_end * len as f32) as usize).clamp(ls + 1, len);
+                }
                 slot.gain = st.gain;
             }
         }
@@ -797,6 +849,13 @@ impl Plugin for Mangle {
                 apply_voice(&mut self.scratch_r, rows, &sv, 1, &mut loop_pos_r);
 
                 let note = voice.note as f32 + voice.tuning;
+                // Note-expression Volume/Pan (parameter map §10): a per-voice
+                // gain plus a balance pan (center = unity, so a voice with no
+                // expression is untouched), applied to each lane's level.
+                let expr_gl = voice.expr_volume
+                    * if voice.expr_pan > 0.0 { 1.0 - voice.expr_pan } else { 1.0 };
+                let expr_gr = voice.expr_volume
+                    * if voice.expr_pan < 0.0 { 1.0 + voice.expr_pan } else { 1.0 };
                 for e in 0..3usize {
                     let (mut lane_l, _) = resolve::lane_params(
                         &self.scratch_l,
@@ -818,6 +877,8 @@ impl Plugin for Mangle {
                     );
                     lane_l.loop_pos = loop_pos_l[e];
                     lane_r.loop_pos = loop_pos_r[e];
+                    lane_l.level *= expr_gl;
+                    lane_r.level *= expr_gr;
                     if !lane_l.gate && !lane_r.gate && !voice.lanes[e].is_ringing() {
                         continue;
                     }
@@ -878,21 +939,70 @@ impl Plugin for Mangle {
             }
         }
 
-        // 9. Stereo width (mid/side) → Squeeze → master level.
+        // 9. Stereo width (mid/side) → filter → Squeeze → master level. Level
+        //    and width are smoothed per sample (~5 ms) so automation doesn't
+        //    zipper.
+        let coef = self.smooth_coef;
         for n in 0..block {
+            self.cur_stereo += (g.stereo - self.cur_stereo) * coef;
             let l = out_l[n];
             let r = out_r[n];
             let mid = 0.5 * (l + r);
-            let side = 0.5 * (l - r) * g.stereo;
+            let side = 0.5 * (l - r) * self.cur_stereo;
             out_l[n] = mid + side;
             out_r[n] = mid - side;
+        }
+        // Master filter (Module::Fx): On/Type from the base patch; Cutoff/Reso
+        // are matrix-modulated *per channel* (an LFO with St.Phase sweeps L and
+        // R divergently). The cutoff is smoothed per channel and coefficients
+        // refresh each control chunk (tan is too costly per sample).
+        let fo = resolve::filter_out(&self.base, &self.params.table);
+        if fo.on {
+            let cut_pos = self.params.table.pos(mp::pid(Module::Fx, 0, 2));
+            let res_pos = self.params.table.pos(mp::pid(Module::Fx, 0, 3));
+            let cut_map = self.params.table.infos[cut_pos].map;
+            // End-of-block source values drive the per-block filter target.
+            let mut sv = SourceValues::zero();
+            self.gmod.fill_sources(&mut sv);
+            let modf = modulated_filter(
+                &self.base,
+                &self.rows[..self.n_rows],
+                &sv,
+                cut_pos as u16,
+                res_pos as u16,
+            );
+            let target_hz = [cut_map.to_display(modf[0].0), cut_map.to_display(modf[1].0)];
+            let reso = [modf[0].1, modf[1].1];
+            let ctrl = CTRL_CHUNK;
+            let cutoff_coef = 1.0 - (-(ctrl as f32) / (0.005 * self.sample_rate)).exp();
+            let mut off = 0;
+            while off < block {
+                let end = (off + ctrl).min(block);
+                for (cutoff, &target) in self.filt_cutoff.iter_mut().zip(target_hz.iter()) {
+                    *cutoff += (target - *cutoff) * cutoff_coef;
+                }
+                self.filter[0].set(self.filt_cutoff[0], reso[0], self.sample_rate);
+                self.filter[1].set(self.filt_cutoff[1], reso[1], self.sample_rate);
+                for n in off..end {
+                    out_l[n] = self.filter[0].process(out_l[n], fo.ftype);
+                    out_r[n] = self.filter[1].process(out_r[n], fo.ftype);
+                }
+                off = end;
+            }
+        } else {
+            // Keep the smoother tracking the target and states clear so the first
+            // block after enabling starts from the right cutoff, silent.
+            self.filt_cutoff = [fo.cutoff; 2];
+            self.filter[0].clear();
+            self.filter[1].clear();
         }
         if g.squeeze {
             self.squeeze.process(out_l, out_r);
         }
         for n in 0..block {
-            out_l[n] *= g.level;
-            out_r[n] *= g.level;
+            self.cur_level += (g.level - self.cur_level) * coef;
+            out_l[n] *= self.cur_level;
+            out_r[n] *= self.cur_level;
         }
 
         // 10. Feed the env-follower source with the final output.

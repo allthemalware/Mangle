@@ -160,7 +160,14 @@ fn load_sample_with_cap(
         hint.with_extension(ext);
     }
     let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            // enable_gapless trims encoder delay/padding (e.g. mp3's ~1105
+            // leading samples) so it doesn't sit inside the default loop window.
+            &FormatOptions { enable_gapless: true, ..Default::default() },
+            &MetadataOptions::default(),
+        )
         .map_err(|e| LoadError::Decode(e.to_string()))?;
     let mut format = probed.format;
 
