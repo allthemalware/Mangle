@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nih_plug::prelude::*;
+use nih_plug_egui::resizable_window::ResizableWindow;
 use nih_plug_egui::{create_egui_editor, egui};
 
 use egui::{
@@ -47,6 +48,12 @@ const ACCENT_FAINT: Color32 = Color32::from_rgba_premultiplied(0x14, 0x18, 0x0a,
 
 const CELL_H: f32 = 18.0;
 const GAP: f32 = 2.0;
+
+/// Below this width the layout stops shrinking and the body scrolls
+/// horizontally instead; the window itself may go smaller.
+const MIN_CONTENT_W: f32 = 1000.0;
+/// Smallest window the resize corner allows.
+const MIN_WINDOW: (f32, f32) = (640.0, 400.0);
 
 // --------------------------------------------------- paint primitives ---
 // All egui paint calls funnel through these three so any API drift in the
@@ -226,6 +233,7 @@ fn load_into_slot(params: &MangleParams, slot: usize, path: &std::path::Path) ->
                     path: path_str,
                     content_hash: loaded.content_hash,
                     summary,
+                    consumed: false,
                 });
             }
             format!("slot {} \u{2190} {}", slot + 1, name)
@@ -326,7 +334,16 @@ fn cell(ui: &mut Ui, setter: &ParamSetter, c: &CellParam, label: &str, w: f32) {
     }
     if hovered {
         // API: raw_scroll_delta was scroll_delta in older egui.
-        let scroll = ui.input(|i| i.raw_scroll_delta.y);
+        // Take the wheel delta and zero it so the surrounding ScrollArea
+        // doesn't pan the page while a value is being stepped.
+        let scroll = ui.input_mut(|i| {
+            let d = i.raw_scroll_delta.y;
+            if d != 0.0 {
+                i.raw_scroll_delta = egui::Vec2::ZERO;
+                i.smooth_scroll_delta = egui::Vec2::ZERO;
+            }
+            d
+        });
         if scroll.abs() > 0.0 {
             let step = match c.steps {
                 Some(s) if s > 1 => 1.0 / (s - 1) as f32,
@@ -469,6 +486,13 @@ fn draw_editor(
     if let Some(status) = poll_dialog_results(params) {
         st.status = status;
     }
+    // Reclaim loads the audio thread consumed: each entry now carries the
+    // previous slot contents, which must be freed here — the audio thread
+    // never deallocates. (While the editor is closed they just sit in the
+    // queue; new loads only originate here, so the backlog is bounded.)
+    if let Ok(mut q) = params.pending_loads.lock() {
+        q.retain(|p| !p.consumed);
+    }
     // While any picker is open, keep repainting so its result shows up without
     // needing a mouse move to wake the editor.
     if params
@@ -481,10 +505,15 @@ fn draw_editor(
 
     header_bar(ctx, setter, params, st, &mut ex, &mut ex_changed);
 
-    egui::CentralPanel::default()
-        .frame(egui::Frame::new().fill(BG).inner_margin(4.0))
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
+    // ResizableWindow adds a drag corner that requests a host resize via
+    // EguiState; it wraps the central panel (fill comes from panel_fill = BG,
+    // set in the builder). The body scrolls on both axes: below MIN_CONTENT_W
+    // the layout stops adapting and a horizontal scrollbar takes over.
+    ResizableWindow::new("mangle-resize")
+        .min_size(vec2(MIN_WINDOW.0, MIN_WINDOW.1))
+        .show(ctx, params.editor_state.as_ref(), |ui| {
+            egui::ScrollArea::both().show(ui, |ui| {
+                ui.set_min_width(MIN_CONTENT_W);
                 if st.curves_mode {
                     curves_screen(ui, st, &mut ex, &mut ex_changed);
                 } else {
@@ -539,78 +568,82 @@ fn header_bar(
     egui::TopBottomPanel::top("hdr")
         .frame(egui::Frame::new().fill(HEADER).inner_margin(4.0))
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                txt(
-                    ui,
-                    Pos2::new(ui.cursor().left() + 4.0, ui.cursor().top() + CELL_H * 0.5),
-                    Align2::LEFT_CENTER,
-                    "MANGLE",
-                    13.0,
-                    BRIGHT,
-                );
-                ui.add_space(70.0);
-                cell(ui, setter, &params.cp(Module::Global, 0, 0), "ON", 70.0);
-                cell(ui, setter, &params.cp(Module::Global, 0, 1), "KEY", 92.0);
-                cell(ui, setter, &params.cp(Module::Global, 0, 2), "STEREO", 96.0);
-                cell(ui, setter, &params.cp(Module::Global, 0, 3), "SQUEEZE", 92.0);
-                cell(ui, setter, &params.cp(Module::Global, 0, 4), "LEVEL", 104.0);
-                cell(ui, setter, &params.cp(Module::Global, 0, 5), "VOICES", 86.0);
-                ui.add_space(12.0);
+            // Horizontal scroll so RND/TOOLS/CURVES stay reachable when the
+            // window is narrower than the header row.
+            egui::ScrollArea::horizontal().id_salt("hdr-scroll").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    txt(
+                        ui,
+                        Pos2::new(ui.cursor().left() + 4.0, ui.cursor().top() + CELL_H * 0.5),
+                        Align2::LEFT_CENTER,
+                        "MANGLE",
+                        13.0,
+                        BRIGHT,
+                    );
+                    ui.add_space(70.0);
+                    cell(ui, setter, &params.cp(Module::Global, 0, 0), "ON", 70.0);
+                    cell(ui, setter, &params.cp(Module::Global, 0, 1), "KEY", 92.0);
+                    cell(ui, setter, &params.cp(Module::Global, 0, 2), "STEREO", 96.0);
+                    cell(ui, setter, &params.cp(Module::Global, 0, 3), "SQUEEZE", 92.0);
+                    cell(ui, setter, &params.cp(Module::Global, 0, 4), "LEVEL", 104.0);
+                    cell(ui, setter, &params.cp(Module::Global, 0, 5), "VOICES", 86.0);
+                    ui.add_space(12.0);
 
-                // RANDOM die: click = roll, right-click = settings.
-                let rnd = tbtn(ui, "\u{2684} RND", false, 64.0); // ⚄
-                if rnd.clicked() {
-                    let seed = entropy_seed();
-                    roll_random(params, setter, ex, seed);
-                    ex.last_seed = seed;
-                    *ex_changed = true;
-                }
-                rnd.context_menu(|ui| {
-                    ui.set_min_width(220.0);
-                    if ui
-                        .add(egui::Slider::new(&mut ex.random_amount, 0.0..=1.0).text("AMOUNT"))
-                        .changed()
-                    {
-                        *ex_changed = true;
-                    }
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut ex.random_complexity, 0.0..=1.0)
-                                .text("COMPLEXITY"),
-                        )
-                        .changed()
-                    {
-                        *ex_changed = true;
-                    }
-                    ui.label(format!("last seed {:016x}", ex.last_seed));
-                    ui.label("padlocks on section headers = locks");
-                });
-
-                ui.menu_button("TOOLS", |ui| {
-                    if ui.button("INIT PATCH").clicked() {
-                        apply_patch(params, setter, &Patch::init(&params.table));
-                        ui.close_menu();
-                    }
-                    if ui.button("REROLL LAST SEED").clicked() {
-                        let seed = ex.last_seed;
+                    // RANDOM die: click = roll, right-click = settings.
+                    let rnd = tbtn(ui, "\u{2684} RND", false, 64.0); // ⚄
+                    if rnd.clicked() {
+                        let seed = entropy_seed();
                         roll_random(params, setter, ex, seed);
-                        ui.close_menu();
+                        ex.last_seed = seed;
+                        *ex_changed = true;
                     }
-                    ui.separator();
-                    for (a, b, label) in
-                        [(0u8, 1u8, "COPY G1 \u{2192} G2"), (0, 2, "COPY G1 \u{2192} G3"), (1, 2, "COPY G2 \u{2192} G3")]
-                    {
-                        if ui.button(label).clicked() {
-                            copy_grain(params, setter, a, b);
+                    rnd.context_menu(|ui| {
+                        ui.set_min_width(220.0);
+                        if ui
+                            .add(egui::Slider::new(&mut ex.random_amount, 0.0..=1.0).text("AMOUNT"))
+                            .changed()
+                        {
+                            *ex_changed = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut ex.random_complexity, 0.0..=1.0)
+                                    .text("COMPLEXITY"),
+                            )
+                            .changed()
+                        {
+                            *ex_changed = true;
+                        }
+                        ui.label(format!("last seed {:016x}", ex.last_seed));
+                        ui.label("padlocks on section headers = locks");
+                    });
+
+                    ui.menu_button("TOOLS", |ui| {
+                        if ui.button("INIT PATCH").clicked() {
+                            apply_patch(params, setter, &Patch::init(&params.table));
                             ui.close_menu();
                         }
+                        if ui.button("REROLL LAST SEED").clicked() {
+                            let seed = ex.last_seed;
+                            roll_random(params, setter, ex, seed);
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        for (a, b, label) in
+                            [(0u8, 1u8, "COPY G1 \u{2192} G2"), (0, 2, "COPY G1 \u{2192} G3"), (1, 2, "COPY G2 \u{2192} G3")]
+                        {
+                            if ui.button(label).clicked() {
+                                copy_grain(params, setter, a, b);
+                                ui.close_menu();
+                            }
+                        }
+                    });
+
+                    let cv = tbtn(ui, if st.curves_mode { "BACK" } else { "CURVES" }, st.curves_mode, 70.0);
+                    if cv.clicked() {
+                        st.curves_mode = !st.curves_mode;
                     }
                 });
-
-                let cv = tbtn(ui, if st.curves_mode { "BACK" } else { "CURVES" }, st.curves_mode, 70.0);
-                if cv.clicked() {
-                    st.curves_mode = !st.curves_mode;
-                }
             });
         });
 }

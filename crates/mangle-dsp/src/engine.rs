@@ -364,8 +364,11 @@ impl Lane {
         }
         for g in self.fading.iter_mut() {
             let slot = match bank.slots[g.snap.slot].as_ref() {
-                Some(s) => s,
-                None => {
+                // The window was latched at spawn; if the slot has since been
+                // swapped for a shorter sample, reading it would go out of
+                // bounds — kill the grain like a vanished slot.
+                Some(s) if g.snap.wstart + g.snap.wlen <= s.len() => s,
+                _ => {
                     g.age = g.snap.length;
                     continue;
                 }
@@ -493,9 +496,11 @@ impl Lane {
         // 3. Render all live grains.
         for g in self.grains.iter_mut() {
             let slot = match bank.slots[g.snap.slot].as_ref() {
-                Some(s) => s,
-                None => {
-                    g.age = g.snap.length; // slot vanished: kill silently
+                // Window latched at spawn — a swapped-in shorter sample would
+                // put it out of bounds, so kill like a vanished slot.
+                Some(s) if g.snap.wstart + g.snap.wlen <= s.len() => s,
+                _ => {
+                    g.age = g.snap.length;
                     continue;
                 }
             };
@@ -698,6 +703,36 @@ mod tests {
         assert!(rms > 0.05, "rms too low: {rms}");
         for v in l.iter().chain(r.iter()) {
             assert!(v.is_finite());
+        }
+    }
+
+    /// Loading a shorter sample into a slot mid-note must not crash: live
+    /// grains latched a read window from the old sample, and rendering them
+    /// against the new data would index out of bounds. They must be killed,
+    /// not read.
+    #[test]
+    fn slot_swap_to_shorter_sample_kills_stale_grains() {
+        let sr = 48_000.0;
+        let mut bank = SampleBank::new();
+        bank.slots[0] = Some(SampleSlot::constant(1.0, 96_000, sr));
+        let p = LaneParams { loop_on: false, ..Default::default() };
+        let pp = [p, p];
+        let mut lane = Lane::new(0xBADC0DE);
+        let mut l = vec![0.0f32; 512];
+        let mut r = vec![0.0f32; 512];
+        // Spawn grains against the long sample...
+        for _ in 0..8 {
+            lane.process(&pp, &bank, (0.0, 0.0), sr, &mut l, &mut r, 512);
+        }
+        // ...then a GUI load swaps the slot for a much shorter one.
+        bank.slots[0] = Some(SampleSlot::constant(0.5, 1_000, sr));
+        for _ in 0..8 {
+            l.fill(0.0);
+            r.fill(0.0);
+            lane.process(&pp, &bank, (0.0, 0.0), sr, &mut l, &mut r, 512);
+            for v in l.iter().chain(r.iter()) {
+                assert!(v.is_finite());
+            }
         }
     }
 

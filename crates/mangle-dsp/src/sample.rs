@@ -62,6 +62,20 @@ impl SampleSlot {
         self.len() == 0
     }
 
+    /// Zero-length slot. Does not allocate, so it can be built on the audio
+    /// thread (e.g. as a swap placeholder when draining GUI sample loads).
+    pub fn empty() -> Self {
+        Self {
+            data: [Vec::new(), Vec::new()],
+            sample_rate: 0.0,
+            root_note: 60,
+            loop_start: 0,
+            loop_end: 0,
+            gain: 1.0,
+            mono: true,
+        }
+    }
+
     /// Constant-valued sample — used by the COLA/engine tests.
     pub fn constant(value: f32, n: usize, sample_rate: f32) -> Self {
         Self {

@@ -66,6 +66,11 @@ pub struct PendingLoad {
     /// Waveform summary, computed on the GUI thread at enqueue time so the
     /// audio-thread drain stays allocation- and lock-free.
     pub summary: WaveSummary,
+    /// Set by the audio thread once the sample has been swapped into the
+    /// bank. The entry then holds the *previous* slot contents (if any) and
+    /// stays queued until the GUI thread reclaims it — the audio thread must
+    /// never deallocate, so it hands the garbage back instead of dropping it.
+    pub consumed: bool,
 }
 
 // ------------------------------------------------------------- params ---
@@ -690,13 +695,22 @@ impl Plugin for Mangle {
 
         // Drain any GUI-side sample loads (drag-drop / dialog). The decode,
         // resample, waveform summary, and slot-ref/extra bookkeeping all
-        // happened on the GUI thread; here we only swap the boxed sample into
-        // the bank — a pointer move, no allocation or lock. try_lock keeps it
-        // RT-safe: if the GUI holds the queue lock we pick them up next block.
+        // happened on the GUI thread; here we only swap the new sample into
+        // the bank and the old slot contents back into the queue entry —
+        // pointer moves only, no allocation or deallocation (the GUI thread
+        // reclaims consumed entries and frees the old sample there). try_lock
+        // keeps it RT-safe: if the GUI holds the lock we retry next block.
         if let Ok(mut pending) = self.params.pending_loads.try_lock() {
-            for p in pending.drain(..) {
+            for p in pending.iter_mut() {
+                if p.consumed {
+                    continue;
+                }
                 let i = p.slot.min(5);
-                self.bank.slots[i] = Some(*p.sample);
+                let new = std::mem::replace(p.sample.as_mut(), SampleSlot::empty());
+                if let Some(old) = self.bank.slots[i].replace(new) {
+                    *p.sample = old;
+                }
+                p.consumed = true;
             }
         }
 
