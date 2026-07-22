@@ -34,6 +34,7 @@ use mangle_dsp::engine::GrainMode;
 use mangle_dsp::params::{pid, Module, Patch, GRAIN_MODE_IDX, N_GRAIN_MODES};
 use mangle_dsp::random::{randomize, RandomOptions};
 
+use crate::feed::FeedFrame;
 use crate::{MangleParams, PendingLoad, PSlot};
 
 // ------------------------------------------------------------ palette ---
@@ -46,6 +47,18 @@ const DIM: Color32 = Color32::from_rgb(0x6e, 0x7c, 0x57);
 const ACCENT: Color32 = Color32::from_rgb(0xa4, 0xbf, 0x55);
 const BRIGHT: Color32 = Color32::from_rgb(0xd8, 0xe6, 0xae);
 const ACCENT_FAINT: Color32 = Color32::from_rgba_premultiplied(0x14, 0x18, 0x0a, 0xff);
+
+/// Per-engine display colors (G1 = house green, G2 = amber, G3 = teal) —
+/// phosphor variants that read against the terminal palette above.
+const ENG_COLORS: [Color32; 3] = [
+    ACCENT,
+    Color32::from_rgb(0xd9, 0xa6, 0x48),
+    Color32::from_rgb(0x5f, 0xb0, 0xa0),
+];
+
+fn with_alpha(c: Color32, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
+}
 
 const CELL_H: f32 = 18.0;
 const GAP: f32 = 2.0;
@@ -449,6 +462,9 @@ struct UiState {
     status: String,
     /// Slot a hovered file-drop would land in (for highlight).
     drop_target: Option<usize>,
+    /// Last engine-activity frame copied from the audio thread's feed
+    /// (kept when a try_lock misses, so the display never blanks).
+    feed: FeedFrame,
 }
 
 // -------------------------------------------------------------- entry ---
@@ -467,6 +483,12 @@ fn draw_editor(
         Err(_) => return,
     };
     let mut ex_changed = false;
+
+    // Latest engine-activity frame for the overlay/lanes displays; on
+    // try_lock contention just keep the previous copy.
+    if let Ok(f) = params.feed.frame.try_lock() {
+        st.feed = *f;
+    }
 
     // --- drag & drop -------------------------------------------------
     // While files hover, mark a drop target (slot under the pointer if it's
@@ -563,6 +585,11 @@ fn draw_editor(
         }
         params.extra_gen.fetch_add(1, std::sync::atomic::Ordering::Release);
     }
+
+    // ~30 Hz tick so the realtime displays animate without input events.
+    // API: egui-baseview honors repaint_delay; if a backend ignores it,
+    // switch to plain request_repaint().
+    ctx.request_repaint_after(std::time::Duration::from_millis(33));
 }
 
 pub(crate) fn create(params: Arc<MangleParams>) -> Option<Box<dyn Editor>> {
@@ -791,6 +818,47 @@ fn waveform_strip(
     for x in [sx, ex_] {
         ui.painter()
             .line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], Stroke::new(2.0, ACCENT));
+    }
+
+    // Live engine activity (audio feed), for engines reading this slot:
+    // grain ticks in three per-engine bands near the top (fading with grain
+    // age, L nudged above R), and each engine's read cursor — full-height
+    // for the playhead modes (Stretch/Spectral), a short bottom tick for
+    // the spawn-position modes (Granular/Cloud). Paint-only: no Sense, so
+    // loop dragging is untouched.
+    for (e, ef) in st.feed.engines.iter().enumerate() {
+        let col = ENG_COLORS[e];
+        for g in &ef.grains[..(ef.n_grains as usize).min(ef.grains.len())] {
+            if g.slot as usize != sel || !g.pos.is_finite() {
+                continue;
+            }
+            let x = rect.left() + g.pos * rect.width();
+            let y0 = rect.top() + 3.0 + e as f32 * 9.0 + g.channel as f32 * 2.0;
+            let a = ((1.0 - g.age) * 200.0).clamp(40.0, 200.0) as u8;
+            ui.painter().line_segment(
+                [Pos2::new(x, y0), Pos2::new(x, y0 + 6.0)],
+                Stroke::new(2.0, with_alpha(col, a)),
+            );
+        }
+        if ef.slot as usize == sel {
+            let playhead = ef.mode == 1 || ef.mode == 3; // Stretch / Spectral
+            for ch in 0..2 {
+                let c = ef.cursor[ch];
+                if !c.is_finite() {
+                    continue;
+                }
+                let x = rect.left() + c * rect.width();
+                let (y0, y1) = if playhead {
+                    (rect.top(), rect.bottom())
+                } else {
+                    (rect.bottom() - 10.0, rect.bottom())
+                };
+                ui.painter().line_segment(
+                    [Pos2::new(x, y0), Pos2::new(x, y1)],
+                    Stroke::new(1.0, with_alpha(col, 180)),
+                );
+            }
+        }
     }
 
     // Loop drag: edges resize, body moves.
@@ -1350,6 +1418,32 @@ mod gui_tests {
         // Warm-up so layout rects exist before we start clicking them.
         frame(&mut st, vec![]);
         frame(&mut st, vec![]);
+
+        // Synthetic engine-activity frame through the real feed path, so the
+        // waveform overlay paints (the finite-geometry assertions cover it).
+        {
+            let mut ff = FeedFrame::default();
+            let ef = &mut ff.engines[0];
+            for (i, pos) in [0.0f32, 0.5, 1.0].into_iter().enumerate() {
+                ef.grains[i] = mangle_dsp::engine::GrainView {
+                    pos,
+                    age: 0.5,
+                    level: 0.8,
+                    slot: 0,
+                    channel: (i % 2) as u8,
+                };
+            }
+            ef.n_grains = 3;
+            ef.slot = 0;
+            ef.mode = 1; // Stretch: full-height playhead
+            ef.cursor = [0.3, 0.35];
+            ff.engines[1].slot = 0;
+            ff.engines[1].mode = 0; // Granular: bottom tick (+ one NaN channel)
+            ff.engines[1].cursor = [0.7, f32::NAN];
+            ff.voices = 2;
+            *params.feed.frame.lock().unwrap() = ff;
+            frame(&mut st, vec![]);
+        }
 
         // Header sweep (hits the bool cells -> real param gestures).
         {
