@@ -253,7 +253,7 @@ impl MangleParams {
             ints,
             bools,
             slots,
-            editor_state: EguiState::from_size(1280, 860),
+            editor_state: EguiState::from_size(1000, 760),
             waveforms: RwLock::new([None, None, None, None, None, None]),
             extra: RwLock::new(ExtraState::default()),
             extra_gen: AtomicU64::new(1),

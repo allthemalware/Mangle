@@ -12,7 +12,8 @@
 //! * padlock on a section header = exclude that unit from RANDOM
 //! * RND = randomize (right-click for Amount / Complexity / seed)
 //! * waveform: drag loop edges, drag the region body to move it
-//! * CURVES swaps to the curve editor (freehand draw + presets + ops)
+//! * body tabs: ENGINES (one engine at a time) / MOD / MATRIX / CURVES
+//!   (freehand draw + presets + ops); header + waveform stay put
 //!
 //! `API:` comments mark the egui / nih_plug_egui call sites most likely to
 //! need a touch-up against a given checkout (see BUILD_NOTES.md).
@@ -50,8 +51,9 @@ const CELL_H: f32 = 18.0;
 const GAP: f32 = 2.0;
 
 /// Below this width the layout stops shrinking and the body scrolls
-/// horizontally instead; the window itself may go smaller.
-const MIN_CONTENT_W: f32 = 1000.0;
+/// horizontally instead; the window itself may go smaller. Tabbing the body
+/// let this drop from 1000 (three engine columns side by side) to 760.
+const MIN_CONTENT_W: f32 = 760.0;
 /// Smallest window the resize corner allows.
 const MIN_WINDOW: (f32, f32) = (640.0, 400.0);
 
@@ -423,9 +425,21 @@ enum LoopDrag {
     Move(f32), // grab offset from loop start, in normalized units
 }
 
+/// Body pages under the persistent header/waveform/lanes area.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum Tab {
+    #[default]
+    Engines,
+    Mod,
+    Matrix,
+    Curves,
+}
+
 #[derive(Default)]
 struct UiState {
-    curves_mode: bool,
+    tab: Tab,
+    /// ENGINES tab: which grain engine is shown (0..3).
+    engine_page: usize,
     matrix_page: usize,
     selected_slot: usize,
     selected_curve: usize,
@@ -505,6 +519,20 @@ fn draw_editor(
 
     header_bar(ctx, setter, params, st, &mut ex, &mut ex_changed);
 
+    // Persistent strip: waveform + slot row and the body tab bar stay visible
+    // whatever page is open below. Its own horizontal scroll mirrors the
+    // body's MIN_CONTENT_W behavior when the window is narrow.
+    egui::TopBottomPanel::top("strip")
+        .frame(egui::Frame::new().fill(BG).inner_margin(4.0))
+        .show(ctx, |ui| {
+            egui::ScrollArea::horizontal().id_salt("strip-scroll").show(ui, |ui| {
+                ui.set_min_width(MIN_CONTENT_W);
+                waveform_strip(ui, setter, params, st, &mut ex, &mut ex_changed);
+                ui.add_space(GAP);
+                tab_bar(ui, st);
+            });
+        });
+
     // ResizableWindow adds a drag corner that requests a host resize via
     // EguiState; it wraps the central panel (fill comes from panel_fill = BG,
     // set in the builder). The body scrolls on both axes: below MIN_CONTENT_W
@@ -514,18 +542,17 @@ fn draw_editor(
         .show(ctx, params.editor_state.as_ref(), |ui| {
             egui::ScrollArea::both().show(ui, |ui| {
                 ui.set_min_width(MIN_CONTENT_W);
-                if st.curves_mode {
-                    curves_screen(ui, st, &mut ex, &mut ex_changed);
-                } else {
-                    waveform_strip(ui, setter, params, st, &mut ex, &mut ex_changed);
-                    ui.add_space(GAP * 2.0);
-                    engines_row(ui, setter, params, &mut ex, &mut ex_changed);
-                    ui.add_space(GAP * 2.0);
-                    lfo_and_friends(ui, setter, params, &mut ex, &mut ex_changed);
-                    ui.add_space(GAP * 2.0);
-                    filter_panel(ui, setter, params);
-                    ui.add_space(GAP * 2.0);
-                    matrix_panel(ui, setter, params, st, &mut ex, &mut ex_changed);
+                match st.tab {
+                    Tab::Engines => engines_page(ui, setter, params, st, &mut ex, &mut ex_changed),
+                    Tab::Mod => lfo_and_friends(ui, setter, params, &mut ex, &mut ex_changed),
+                    Tab::Matrix => {
+                        // Cutoff/Reso are matrix destinations, so the filter
+                        // row keeps its seat just above the grid.
+                        filter_panel(ui, setter, params);
+                        ui.add_space(GAP * 2.0);
+                        matrix_panel(ui, setter, params, st, &mut ex, &mut ex_changed);
+                    }
+                    Tab::Curves => curves_screen(ui, st, &mut ex, &mut ex_changed),
                 }
             });
         });
@@ -561,7 +588,7 @@ fn header_bar(
     ctx: &egui::Context,
     setter: &ParamSetter,
     params: &MangleParams,
-    st: &mut UiState,
+    _st: &mut UiState,
     ex: &mut mangle_dsp::state::ExtraState,
     ex_changed: &mut bool,
 ) {
@@ -639,13 +666,26 @@ fn header_bar(
                         }
                     });
 
-                    let cv = tbtn(ui, if st.curves_mode { "BACK" } else { "CURVES" }, st.curves_mode, 70.0);
-                    if cv.clicked() {
-                        st.curves_mode = !st.curves_mode;
-                    }
                 });
             });
         });
+}
+
+/// Body page selector, pinned at the bottom of the persistent strip.
+fn tab_bar(ui: &mut Ui, st: &mut UiState) {
+    const TABS: [(Tab, &str); 4] = [
+        (Tab::Engines, "ENGINES"),
+        (Tab::Mod, "MOD"),
+        (Tab::Matrix, "MATRIX"),
+        (Tab::Curves, "CURVES"),
+    ];
+    ui.horizontal(|ui| {
+        for (tab, label) in TABS {
+            if tbtn(ui, label, st.tab == tab, 84.0).clicked() {
+                st.tab = tab;
+            }
+        }
+    });
 }
 
 fn roll_random(
@@ -889,60 +929,75 @@ const LFO_GRID: [(u8, &str); 10] = [
     (9, "1SHOT"),
 ];
 
-fn engines_row(
+/// ENGINES tab: a G1/G2/G3 selector, then the selected engine's grain grid
+/// and Loop-LFO grid side by side. Same `GRAIN_GRID`/`LFO_GRID` cells as the
+/// old three-column row, just one engine at a time (and roomier for it).
+fn engines_page(
     ui: &mut Ui,
     setter: &ParamSetter,
     params: &MangleParams,
+    st: &mut UiState,
     ex: &mut mangle_dsp::state::ExtraState,
     ex_changed: &mut bool,
 ) {
-    let total = ui.available_width() - 6.0; // right-edge safety margin
-    let colw = (total - GAP * 2.0) / 3.0;
-    let cw = (colw - GAP) / 2.0;
-    ui.horizontal_top(|ui| {
-        for eng in 0..3usize {
-            ui.vertical(|ui| {
-                ui.set_width(colw);
-                ui.horizontal(|ui| {
-                    section_label(ui, &format!("GRAIN.{}", eng + 1));
-                    let gate = params.cp(Module::Grain, eng as u8, 0);
-                    let on = gate.norm() >= 0.5;
-                    if tbtn(ui, "GATE", on, 56.0).clicked() {
-                        gate.begin(setter);
-                        gate.set(setter, if on { 0.0 } else { 1.0 });
-                        gate.end(setter);
-                    }
-                    lock_btn(ui, &mut ex.locks.grain[eng], ex_changed);
-                });
-                let mode = {
-                    let n = params.cp(Module::Grain, eng as u8, GRAIN_MODE_IDX).norm();
-                    GrainMode::from_index((n * (N_GRAIN_MODES as f32 - 1.0)).round() as usize)
-                };
-                for pair in GRAIN_GRID.chunks(2) {
-                    ui.horizontal(|ui| {
-                        for (idx, label) in pair {
-                            let cp = params.cp(Module::Grain, eng as u8, *idx);
-                            cell(ui, setter, &cp, mode_label(*idx, label, mode), cw);
-                        }
-                    });
-                }
-                ui.add_space(GAP);
-                ui.horizontal(|ui| {
-                    section_label(ui, &format!("LOOP.LFO.{}", eng + 1));
-                    lock_btn(ui, &mut ex.locks.loop_lfo[eng], ex_changed);
-                });
-                for pair in LFO_GRID.chunks(2) {
-                    ui.horizontal(|ui| {
-                        for (idx, label) in pair {
-                            cell(ui, setter, &params.cp(Module::LoopLfo, eng as u8, *idx), label, cw);
-                        }
-                    });
-                }
-            });
-            if eng < 2 {
-                ui.add_space(GAP);
+    let eng = st.engine_page.min(2);
+    ui.horizontal(|ui| {
+        section_label(ui, "ENGINE");
+        for e in 0..3usize {
+            if tbtn(ui, &format!("G{}", e + 1), e == eng, 44.0).clicked() {
+                st.engine_page = e;
             }
         }
+        ui.add_space(12.0);
+        let gate = params.cp(Module::Grain, eng as u8, 0);
+        let on = gate.norm() >= 0.5;
+        if tbtn(ui, "GATE", on, 56.0).clicked() {
+            gate.begin(setter);
+            gate.set(setter, if on { 0.0 } else { 1.0 });
+            gate.end(setter);
+        }
+        lock_btn(ui, &mut ex.locks.grain[eng], ex_changed);
+    });
+    ui.add_space(GAP * 2.0);
+
+    let total = ui.available_width() - 6.0; // right-edge safety margin
+    let left_w = (total - GAP * 2.0) * 0.5;
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(left_w);
+            let cw = (left_w - GAP) / 2.0;
+            ui.horizontal(|ui| {
+                section_label(ui, &format!("GRAIN.{}", eng + 1));
+            });
+            let mode = {
+                let n = params.cp(Module::Grain, eng as u8, GRAIN_MODE_IDX).norm();
+                GrainMode::from_index((n * (N_GRAIN_MODES as f32 - 1.0)).round() as usize)
+            };
+            for pair in GRAIN_GRID.chunks(2) {
+                ui.horizontal(|ui| {
+                    for (idx, label) in pair {
+                        let cp = params.cp(Module::Grain, eng as u8, *idx);
+                        cell(ui, setter, &cp, mode_label(*idx, label, mode), cw);
+                    }
+                });
+            }
+        });
+        ui.add_space(GAP * 2.0);
+        ui.vertical(|ui| {
+            let rw = ui.available_width() - 6.0;
+            let cw = (rw - GAP) / 2.0;
+            ui.horizontal(|ui| {
+                section_label(ui, &format!("LOOP.LFO.{}", eng + 1));
+                lock_btn(ui, &mut ex.locks.loop_lfo[eng], ex_changed);
+            });
+            for pair in LFO_GRID.chunks(2) {
+                ui.horizontal(|ui| {
+                    for (idx, label) in pair {
+                        cell(ui, setter, &params.cp(Module::LoopLfo, eng as u8, *idx), label, cw);
+                    }
+                });
+            }
+        });
     });
 }
 
@@ -1329,12 +1384,34 @@ mod gui_tests {
             frame(&mut st, ev);
         }
 
+        // Every tab, and each engine page, with a click/scroll sweep on each.
+        for tab in [Tab::Engines, Tab::Mod, Tab::Matrix, Tab::Curves] {
+            st.tab = tab;
+            for eng in 0..3usize {
+                st.engine_page = eng;
+                let mut ev = Vec::new();
+                for gx in 0..10 {
+                    click(&mut ev, gx as f32 * 90.0 - 20.0, 260.0 + gx as f32 * 20.0);
+                }
+                ev.push(Event::MouseWheel {
+                    unit: MouseWheelUnit::Line,
+                    delta: vec2(0.0, if eng % 2 == 0 { -3.0 } else { 3.0 }),
+                    modifiers: Modifiers::default(),
+                });
+                frame(&mut st, ev);
+            }
+        }
+        st.tab = Tab::Engines;
+        st.engine_page = 0;
+
         // Each matrix page.
+        st.tab = Tab::Matrix;
         for page in 0..4usize {
             st.matrix_page = page;
             frame(&mut st, vec![]);
         }
         st.matrix_page = 0;
+        st.tab = Tab::Engines;
 
         // Each slot selected.
         for slot in 0..6usize {
@@ -1342,8 +1419,8 @@ mod gui_tests {
             frame(&mut st, vec![]);
         }
 
-        // Curves screen + a freehand draw on each of the nine curves.
-        st.curves_mode = true;
+        // Curves tab + a freehand draw on each of the nine curves.
+        st.tab = Tab::Curves;
         frame(&mut st, vec![]);
         for c in 0..9usize {
             st.selected_curve = c;
@@ -1355,7 +1432,7 @@ mod gui_tests {
             );
             frame(&mut st, ev);
         }
-        st.curves_mode = false;
+        st.tab = Tab::Engines;
         frame(&mut st, vec![]);
 
         // Interactions actually reached parameters, and gestures balanced.
