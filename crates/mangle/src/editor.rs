@@ -448,6 +448,35 @@ enum Tab {
     Curves,
 }
 
+// ------------------------------------------------- lanes display state ---
+
+/// History ring length of the scrolling lanes (~8.5 s at 30 Hz).
+const LANE_BUCKETS: usize = 256;
+/// Bucket step: the lanes scroll one bucket per tick, frame-rate independent.
+const BUCKET_DT: f64 = 1.0 / 30.0;
+/// Height of one engine lane.
+const LANE_H: f32 = 26.0;
+
+/// One time bucket of an engine lane: grain spawns + output peak.
+#[derive(Clone, Copy, Default)]
+struct LaneBucket {
+    spawns: u16,
+    level: f32,
+}
+
+/// GUI-side scroll history for one engine lane.
+struct LaneHistory {
+    ring: [LaneBucket; LANE_BUCKETS],
+    /// Next write position == oldest bucket.
+    head: usize,
+}
+
+impl Default for LaneHistory {
+    fn default() -> Self {
+        Self { ring: [LaneBucket::default(); LANE_BUCKETS], head: 0 }
+    }
+}
+
 #[derive(Default)]
 struct UiState {
     tab: Tab,
@@ -465,6 +494,12 @@ struct UiState {
     /// Last engine-activity frame copied from the audio thread's feed
     /// (kept when a try_lock misses, so the display never blanks).
     feed: FeedFrame,
+    /// Scrolling-lanes history + bucket clock.
+    lanes: [LaneHistory; 3],
+    last_bucket_time: f64,
+    /// Drained-but-not-yet-bucketed activity (frames can outpace buckets).
+    pending_spawns: [u32; 3],
+    pending_level: [f32; 3],
 }
 
 // -------------------------------------------------------------- entry ---
@@ -550,6 +585,8 @@ fn draw_editor(
             egui::ScrollArea::horizontal().id_salt("strip-scroll").show(ui, |ui| {
                 ui.set_min_width(MIN_CONTENT_W);
                 waveform_strip(ui, setter, params, st, &mut ex, &mut ex_changed);
+                ui.add_space(GAP);
+                lanes_display(ui, params, st);
                 ui.add_space(GAP);
                 tab_bar(ui, st);
             });
@@ -696,6 +733,112 @@ fn header_bar(
                 });
             });
         });
+}
+
+/// Torsion-style scrolling activity lanes: one row per engine, newest at the
+/// right edge. Level trace as dim bars, grain-spawn blobs on top (Spectral
+/// spawns no grains, so its lane shows level only). Click a lane to jump to
+/// that engine's page.
+fn lanes_display(ui: &mut Ui, params: &MangleParams, st: &mut UiState) {
+    // Drain the audio-side accumulators every frame; hold in `pending` until
+    // the bucket clock ticks so nothing is lost when frames outpace buckets.
+    for e in 0..3 {
+        st.pending_spawns[e] = st.pending_spawns[e]
+            .saturating_add(params.feed.spawns[e].swap(0, std::sync::atomic::Ordering::Relaxed));
+        st.pending_level[e] = st.pending_level[e].max(f32::from_bits(
+            params.feed.level_bits[e].swap(0, std::sync::atomic::Ordering::Relaxed),
+        ));
+    }
+
+    let now = ui.input(|i| i.time);
+    if now < st.last_bucket_time || now - st.last_bucket_time > 2.0 {
+        // Time reset or a long gap (editor reopened): restart the scroll and
+        // discard the drained backlog, which may span the closed period.
+        st.lanes = Default::default();
+        st.pending_spawns = [0; 3];
+        st.pending_level = [0.0; 3];
+        st.last_bucket_time = now;
+    }
+    let mut first = true;
+    while now - st.last_bucket_time >= BUCKET_DT {
+        for (e, lane) in st.lanes.iter_mut().enumerate() {
+            // Pending activity lands in the first pushed bucket; catch-up
+            // buckets after a slow frame stay empty.
+            let b = if first {
+                LaneBucket {
+                    spawns: st.pending_spawns[e].min(u16::MAX as u32) as u16,
+                    level: st.pending_level[e],
+                }
+            } else {
+                LaneBucket::default()
+            };
+            lane.ring[lane.head] = b;
+            lane.head = (lane.head + 1) % LANE_BUCKETS;
+        }
+        if first {
+            st.pending_spawns = [0; 3];
+            st.pending_level = [0.0; 3];
+            first = false;
+        }
+        st.last_bucket_time += BUCKET_DT;
+    }
+
+    let w = ui.available_width();
+    for e in 0..3usize {
+        let (rect, resp) = ui.allocate_exact_size(vec2(w, LANE_H), Sense::click());
+        fill(ui, rect, HEADER);
+        frame(ui, rect, BORDER);
+        let col = ENG_COLORS[e];
+        txt(
+            ui,
+            Pos2::new(rect.left() + 4.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            &format!("G{}", e + 1),
+            10.0,
+            col,
+        );
+        let plot = Rect::from_min_max(
+            Pos2::new(rect.left() + 22.0, rect.top() + 1.0),
+            Pos2::new(rect.right() - 1.0, rect.bottom() - 1.0),
+        );
+        let bw = plot.width() / LANE_BUCKETS as f32;
+        let lane = &st.lanes[e];
+        for i in 0..LANE_BUCKETS {
+            let b = lane.ring[(lane.head + i) % LANE_BUCKETS]; // i=0 oldest
+            if b.level <= 0.0 && b.spawns == 0 {
+                continue;
+            }
+            let x = plot.left() + (i as f32 + 0.5) * bw;
+            if b.level > 0.0 {
+                let h = b.level.min(1.0) * (plot.height() - 2.0);
+                ui.painter().line_segment(
+                    [Pos2::new(x, plot.bottom()), Pos2::new(x, plot.bottom() - h)],
+                    Stroke::new(bw.max(1.0), with_alpha(col, 90)),
+                );
+            }
+            if b.spawns > 0 {
+                let r = 1.5 + (b.spawns as f32).sqrt().min(3.5);
+                ui.painter().circle_filled(Pos2::new(x, plot.center().y), r, with_alpha(col, 220));
+            }
+        }
+        if e == 0 && st.feed.voices > 0 {
+            txt(
+                ui,
+                Pos2::new(rect.right() - 4.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                &format!("{}V", st.feed.voices),
+                9.0,
+                DIM,
+            );
+        }
+        if resp.clicked() {
+            st.tab = Tab::Engines;
+            st.engine_page = e;
+        }
+        if e < 2 {
+            ui.add_space(1.0);
+        }
+    }
 }
 
 /// Body page selector, pinned at the bottom of the persistent strip.
@@ -1442,6 +1585,11 @@ mod gui_tests {
             ff.engines[1].cursor = [0.7, f32::NAN];
             ff.voices = 2;
             *params.feed.frame.lock().unwrap() = ff;
+            // Accumulator activity so the lanes push non-empty buckets.
+            params.feed.spawns[0].store(5, Ordering::Relaxed);
+            params.feed.spawns[2].store(70_000, Ordering::Relaxed); // u16 clamp path
+            params.feed.level_bits[1].store(0.6f32.to_bits(), Ordering::Relaxed);
+            frame(&mut st, vec![]);
             frame(&mut st, vec![]);
         }
 
