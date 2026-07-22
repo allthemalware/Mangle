@@ -62,9 +62,12 @@ Bitwig picks it up on the next plugin rescan.
    (wav / flac / aiff / ogg / mp3). The waveform appears in the strip.
 3. Play again — the sample now plays with key tracking. Drag the loop edges
    on the waveform to set the grain window.
-4. Tweak the grain cells (RATE, LENGTH, SPRAY, PITCH, SHAPE…), switch **MODE**
-   between Grains / Stretch / Cloud / Spectral, and hit **⚄ RND** to roll a
-   random patch. Open **CURVES** to draw your own LFO/envelope shapes.
+4. Tweak the grain cells on the **ENGINES** tab (RATE, LENGTH, SPRAY, PITCH,
+   SHAPE…) — **G1 / G2 / G3** switch between the three engines — switch
+   **MODE** between Grains / Stretch / Cloud / Spectral, and hit **⚄ RND** to
+   roll a random patch. The other tabs hold the global **MOD** sources, the
+   **MATRIX** (with the master filter), and **CURVES** for drawing your own
+   LFO/envelope shapes.
 
 ### Loading samples — other paths
 - **Per-slot LOAD button** (native file picker) — the reliable path, works in
@@ -94,6 +97,9 @@ Bitwig picks it up on the next plugin rescan.
 - **Squeeze** output leveler, stereo width, master level.
 - **RANDOM** with per-section padlocks so you can lock what you like and
   reroll the rest.
+- **Realtime engine display:** live grain markers and read cursors overlaid
+  on the waveform, plus a scrolling activity lane per engine (grain bursts +
+  level; click a lane to jump to that engine's page).
 
 The full parameter reference (ranges, defaults, IDs) lives in
 [`mangle-parameter-map.md`](mangle-parameter-map.md).
