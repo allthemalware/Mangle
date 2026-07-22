@@ -63,6 +63,32 @@ impl GrainMode {
             _ => GrainMode::Granular,
         }
     }
+
+    /// The persisted step index (inverse of `from_index`).
+    pub fn index(self) -> usize {
+        match self {
+            GrainMode::Granular => 0,
+            GrainMode::Stretch => 1,
+            GrainMode::Cloud => 2,
+            GrainMode::Spectral => 3,
+        }
+    }
+}
+
+/// One live grain as seen by the GUI display: position within the slot's
+/// *full* sample, not the loop window. Display-only.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GrainView {
+    /// 0..1 read position within the slot's full sample.
+    pub pos: f32,
+    /// 0..1 fraction of the grain's lifetime elapsed.
+    pub age: f32,
+    /// Snapshot amplitude (includes slot gain; clamp GUI-side).
+    pub level: f32,
+    /// Sample slot 0..5.
+    pub slot: u8,
+    /// Emitting stereo channel (0 = L, 1 = R).
+    pub channel: u8,
 }
 
 /// Per-engine pitch quantization (scale lock), chosen by the `Quant` param.
@@ -294,6 +320,8 @@ pub struct Lane {
     /// Spectral-mode phase vocoder. Pre-allocated (boxed to keep `Lane`
     /// small) so switching into Spectral never allocates on the audio thread.
     spectral: Box<SpectralState>,
+    /// Grains spawned since the last `take_spawned` (GUI activity feed).
+    spawned: u32,
 }
 
 impl Lane {
@@ -309,11 +337,79 @@ impl Lane {
             pos_phase: [f64::NAN; 2],
             pos_vel: [0.0; 2],
             spectral: Box::new(SpectralState::new()),
+            spawned: 0,
         }
     }
 
     pub fn active_grains(&self) -> usize {
         self.grains.len()
+    }
+
+    /// Fill `out` with up to `out.len()` live grains for the GUI display;
+    /// returns the count filled. Steal-fade leftovers are skipped (they are
+    /// a dying previous note, not current engine activity).
+    pub fn report_grains(&self, bank: &SampleBank, out: &mut [GrainView]) -> usize {
+        let mut n = 0;
+        for g in &self.grains {
+            if n >= out.len() {
+                break;
+            }
+            let len = match bank.slots[g.snap.slot].as_ref() {
+                Some(s) if s.len() > 0 => s.len(),
+                _ => continue, // slot vanished/swapped: grain dies next block
+            };
+            out[n] = GrainView {
+                pos: (g.pos / len as f64).clamp(0.0, 1.0) as f32,
+                age: (g.age as f32 / g.snap.length.max(1) as f32).clamp(0.0, 1.0),
+                level: g.snap.level,
+                slot: g.snap.slot as u8,
+                channel: g.snap.channel,
+            };
+            n += 1;
+        }
+        n
+    }
+
+    /// Grains spawned since the last call (drain-and-reset).
+    pub fn take_spawned(&mut self) -> u32 {
+        core::mem::take(&mut self.spawned)
+    }
+
+    /// Current read cursor per channel for the GUI display, normalized 0..1
+    /// within the slot's *full* sample, plus the resolved slot index. Meaning
+    /// per mode: Granular/Cloud = where the next grain spawns (scan +
+    /// Position; Cloud sprays around it), Stretch = the scrub playhead,
+    /// Spectral = the vocoder analysis playhead. `p` is one channel's
+    /// resolved params (display tolerates the L/R difference); `scan` is the
+    /// Loop-LFO output pair. `None` when no slot is loaded.
+    pub fn read_cursor(
+        &self,
+        p: &LaneParams,
+        bank: &SampleBank,
+        scan: (f32, f32),
+    ) -> Option<([f32; 2], u8)> {
+        let (slot_idx, wstart, wlen) = resolve_window(p, bank)?;
+        let len = bank.slots[slot_idx].as_ref()?.len().max(1) as f64;
+        let mut cur = [0.0f32; 2];
+        for ch in 0..2usize {
+            let frac = match p.mode {
+                GrainMode::Granular | GrainMode::Cloud => {
+                    (scan_offset(p, scan, ch as u8) + p.position).rem_euclid(1.0) as f64
+                }
+                GrainMode::Stretch => {
+                    (self.playheads[ch] + p.position as f64).rem_euclid(1.0)
+                }
+                GrainMode::Spectral => {
+                    // Mirror the vocoder's read start: playhead + Position
+                    // offset, wrapped to the window (spectral generate()).
+                    (self.spectral.positions()[ch] + p.position as f64 * wlen as f64)
+                        .rem_euclid(wlen.max(1) as f64)
+                        / wlen.max(1) as f64
+                }
+            };
+            cur[ch] = ((wstart as f64 + frac * wlen as f64) / len).clamp(0.0, 1.0) as f32;
+        }
+        Some((cur, slot_idx as u8))
     }
 
     /// True while the lane still has sound to emit: live grains, a steal
@@ -626,6 +722,7 @@ impl Lane {
             channel,
         };
         let grain = ActiveGrain { snap, pos: start, age: 0, delay: offset as u32 };
+        self.spawned = self.spawned.saturating_add(1);
 
         if self.grains.len() < MAX_GRAINS {
             self.grains.push(grain);
@@ -1441,5 +1538,48 @@ mod tests {
         let (_, wstart, wlen) = got.unwrap();
         assert!(wstart + wlen <= len, "window {wstart}+{wlen} exceeds slot len {len}");
         assert!(wlen >= 1, "window length must be positive");
+    }
+
+    /// The GUI feed read-outs: spawn counting, grain views, and the read
+    /// cursor, across the grain modes.
+    #[test]
+    fn gui_readouts_report_activity() {
+        let sr = 48_000.0;
+        let mut bank = SampleBank::new();
+        bank.slots[0] = Some(SampleSlot::test_tone(sr));
+        let p = LaneParams { rate_hz: 25.0, ..Default::default() };
+        let pp = [p, p];
+        let mut lane = Lane::new(1);
+        let (mut l, mut r) = (vec![0.0f32; 4096], vec![0.0f32; 4096]);
+        lane.process(&pp, &bank, (0.0, 0.0), sr, &mut l, &mut r, 4096);
+
+        let spawned = lane.take_spawned();
+        assert!(spawned > 0, "no spawns counted over a block");
+        assert_eq!(lane.take_spawned(), 0, "counter must drain");
+
+        let mut views = [GrainView::default(); 8];
+        let n = lane.report_grains(&bank, &mut views);
+        assert!(n > 0, "no live grains reported");
+        for v in &views[..n] {
+            assert!((0.0..=1.0).contains(&v.pos), "pos out of range: {}", v.pos);
+            assert!((0.0..=1.0).contains(&v.age), "age out of range: {}", v.age);
+            assert_eq!(v.slot, 0);
+        }
+
+        for mode in [GrainMode::Granular, GrainMode::Stretch, GrainMode::Cloud, GrainMode::Spectral]
+        {
+            let pm = LaneParams { mode, ..p };
+            let (cur, slot) = lane
+                .read_cursor(&pm, &bank, (0.25, -0.25))
+                .expect("cursor for a loaded slot");
+            assert_eq!(slot, 0);
+            for c in cur {
+                assert!((0.0..=1.0).contains(&c), "{mode:?} cursor out of range: {c}");
+            }
+        }
+        assert!(
+            lane.read_cursor(&p, &SampleBank::new(), (0.0, 0.0)).is_none(),
+            "cursor must be None with no slots loaded"
+        );
     }
 }

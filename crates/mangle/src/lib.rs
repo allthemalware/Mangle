@@ -42,11 +42,18 @@ use mangle_dsp::squeeze::Squeeze;
 
 /// Master-filter response names (Fx `Type` param), display order = step index.
 const FILTER_TYPE_NAMES: [&str; 4] = ["LP", "BP", "HP", "Notch"];
+
+/// Control-chunk size in samples: modulation tick rate and the upper bound of
+/// any one render segment (segments also split at note-event timings).
+const CTRL_CHUNK: usize = 64;
 use mangle_dsp::state::{self, ExtraState};
 use mangle_dsp::state::SlotRef;
 use mangle_dsp::voice::VoiceManager;
 
 mod editor;
+pub mod feed;
+
+use feed::{EngineFeed, FeedFrame};
 
 /// Per-slot display data for the waveform strip (peaks of the mono mix).
 /// GUI-only; never serialized.
@@ -116,6 +123,10 @@ pub struct MangleParams {
     /// Slots with a file dialog currently open, so the button can show a
     /// busy state and we don't stack pickers.
     pub dialog_open: [AtomicBool; 6],
+    /// Realtime engine-activity feed for the editor's displays. Written by
+    /// the audio thread only while the editor is open; GUI-only, never
+    /// serialized.
+    pub feed: EngineFeed,
 }
 
 fn group_name(info: &ParamInfo) -> String {
@@ -258,6 +269,7 @@ impl MangleParams {
                 AtomicBool::new(false),
                 AtomicBool::new(false),
             ],
+            feed: EngineFeed::default(),
         }
     }
 
@@ -782,11 +794,21 @@ impl Plugin for Mangle {
         out_l.fill(0.0);
         out_r.fill(0.0);
 
+        // Engine-activity capture for the GUI feed. Lanes render into local
+        // per-engine chunk buffers (summed into the master out after each
+        // chunk's voice loop) so per-engine peaks exist at all; the buffers
+        // stay local to dodge split-borrow conflicts with the voice iteration
+        // (see mangle-borrow-fallback.md). All fixed-size — no allocation.
+        let feed_open = self.params.editor_state.is_open();
+        let mut eng_chunk = [[[0.0f32; CTRL_CHUNK]; 2]; 3];
+        let mut eng_peak = [0.0f32; 3];
+        let mut spawn_acc = [0u32; 3];
+        let mut ff = FeedFrame::default();
+
         // 7. Control-chunk loop (~64 samples): global mod pass + source
         //    tick, then per voice the stereo voice pass and rendering. A
         //    fast Loop LFO now scans *within* a host block instead of
         //    jumping once per block.
-        const CTRL_CHUNK: usize = 64;
         // Stack-copy the decoded rows so the loop body can take &mut self (for
         // sample-accurate event handling) without conflicting with a borrow on
         // self.rows. DecodedRow is Copy — see mangle-borrow-fallback.md.
@@ -808,6 +830,10 @@ impl Plugin for Mangle {
                 segment_end(off, next_event.map(|e| e.timing() as usize), block, CTRL_CHUNK);
             let n = seg_end - off;
             let dt = n as f32 / self.sample_rate;
+            for chunk in eng_chunk.iter_mut() {
+                chunk[0][..n].fill(0.0);
+                chunk[1][..n].fill(0.0);
+            }
             let t_sec = if playing {
                 pos_sec0.map(|s| s + off as f64 / self.sample_rate as f64)
             } else {
@@ -918,15 +944,45 @@ impl Plugin for Mangle {
                         _ => voice.loop_lfos[e].tick(&self.loop_curves[e], &lfop, dt),
                     };
                     voice.last_scan[e] = scan;
+                    let [buf_l, buf_r] = &mut eng_chunk[e];
                     voice.lanes[e].process(
                         &[lane_l, lane_r],
                         &self.bank,
                         scan,
                         self.sample_rate,
-                        &mut out_l[off..off + n],
-                        &mut out_r[off..off + n],
+                        &mut buf_l[..n],
+                        &mut buf_r[..n],
                         n,
                     );
+                    // Always drain the lane's spawn counter so it can't go
+                    // stale; the accumulator is only published while the
+                    // editor is open.
+                    spawn_acc[e] =
+                        spawn_acc[e].saturating_add(voice.lanes[e].take_spawned());
+                    if feed_open && seg_end == block {
+                        // Cursor/mode snapshot from the block's final chunk;
+                        // with several sounding voices the last one wins
+                        // (typical use is low polyphony — good enough for a
+                        // display).
+                        let ef = &mut ff.engines[e];
+                        ef.mode = lane_l.mode.index() as u8;
+                        ef.gate = lane_l.gate || lane_r.gate;
+                        if let Some((cur, slot)) =
+                            voice.lanes[e].read_cursor(&lane_l, &self.bank, scan)
+                        {
+                            ef.cursor = cur;
+                            ef.slot = slot;
+                        }
+                    }
+                }
+            }
+            // Fold the per-engine chunks into the master out and the peaks.
+            for (e, chunk) in eng_chunk.iter().enumerate() {
+                for i in 0..n {
+                    let (sl, sr) = (chunk[0][i], chunk[1][i]);
+                    out_l[off + i] += sl;
+                    out_r[off + i] += sr;
+                    eng_peak[e] = eng_peak[e].max(sl.abs()).max(sr.abs());
                 }
             }
             off += n;
@@ -1021,6 +1077,34 @@ impl Plugin for Mangle {
 
         // 10. Feed the env-follower source with the final output.
         self.gmod.env.feed(out_l, out_r, self.sample_rate);
+
+        // 11. Publish the engine-activity feed for the editor (skipped while
+        //     it is closed). Atomic accumulators plus one try_lock'd frame
+        //     copy — the audio thread never blocks or allocates here.
+        if feed_open {
+            for (e, ef) in ff.engines.iter_mut().enumerate() {
+                let mut filled = 0usize;
+                for voice in self.vm.voices.iter() {
+                    if !voice.sounding() || filled >= ef.grains.len() {
+                        continue;
+                    }
+                    filled +=
+                        voice.lanes[e].report_grains(&self.bank, &mut ef.grains[filled..]);
+                }
+                ef.n_grains = filled as u8;
+            }
+            ff.voices = self.vm.sounding_count().min(u8::MAX as usize) as u8;
+            for e in 0..3 {
+                if spawn_acc[e] > 0 {
+                    self.params.feed.spawns[e].fetch_add(spawn_acc[e], Ordering::Relaxed);
+                }
+                self.params.feed.level_bits[e]
+                    .fetch_max(eng_peak[e].to_bits(), Ordering::Relaxed);
+            }
+            if let Ok(mut f) = self.params.feed.frame.try_lock() {
+                *f = ff;
+            }
+        }
 
         ProcessStatus::Normal
     }

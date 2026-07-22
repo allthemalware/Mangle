@@ -333,6 +333,12 @@ impl SpectralState {
         self.ch[0].ringing() || self.ch[1].ringing()
     }
 
+    /// Per-channel analysis playhead, samples into the loop window (display
+    /// read-out; the Position offset is applied by the caller).
+    pub(crate) fn positions(&self) -> [f64; 2] {
+        [self.ch[0].pos, self.ch[1].pos]
+    }
+
     /// Render `block` samples for this lane, **adding** into `out_l`/`out_r`
     /// (matching the grain path). Each channel runs its own vocoder against
     /// its own resolved window / pitch / scrub, honoring per-channel gate.
