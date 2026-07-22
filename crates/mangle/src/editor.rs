@@ -1155,9 +1155,18 @@ fn engines_page(
     ui.horizontal(|ui| {
         section_label(ui, "ENGINE");
         for e in 0..3usize {
-            if tbtn(ui, &format!("G{}", e + 1), e == eng, 44.0).clicked() {
+            let r = tbtn(ui, &format!("G{}", e + 1), e == eng, 44.0);
+            if r.clicked() {
                 st.engine_page = e;
             }
+            // Activity dot in the engine's color: bright while it sounds.
+            let active = st.feed.engines[e].n_grains > 0
+                || st.feed.engines[e].cursor[0].is_finite();
+            ui.painter().circle_filled(
+                Pos2::new(r.rect.right() - 5.0, r.rect.top() + 5.0),
+                2.0,
+                with_alpha(ENG_COLORS[e], if active { 255 } else { 60 }),
+            );
         }
         ui.add_space(12.0);
         let gate = params.cp(Module::Grain, eng as u8, 0);
@@ -1168,6 +1177,15 @@ fn engines_page(
             gate.end(setter);
         }
         lock_btn(ui, &mut ex.locks.grain[eng], ex_changed);
+        ui.add_space(12.0);
+        txt(
+            ui,
+            Pos2::new(ui.cursor().left() + 4.0, ui.cursor().top() + CELL_H * 0.5),
+            Align2::LEFT_CENTER,
+            &format!("{} GRAINS", st.feed.engines[eng].n_grains),
+            9.0,
+            with_alpha(ENG_COLORS[eng], 180),
+        );
     });
     ui.add_space(GAP * 2.0);
 
@@ -1200,6 +1218,12 @@ fn engines_page(
             ui.horizontal(|ui| {
                 section_label(ui, &format!("LOOP.LFO.{}", eng + 1));
                 lock_btn(ui, &mut ex.locks.loop_lfo[eng], ex_changed);
+                // Jump to this engine's loop curve (curves 0..2 = LOOP.1-3).
+                if tbtn(ui, "CURVE", false, 56.0).clicked() {
+                    st.tab = Tab::Curves;
+                    st.selected_curve = eng;
+                    st.last_draw = None;
+                }
             });
             for pair in LFO_GRID.chunks(2) {
                 ui.horizontal(|ui| {
