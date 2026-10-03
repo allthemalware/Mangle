@@ -1,3 +1,14 @@
 [workspace]
 resolver = "2"
 members = ["crates/mangle-dsp", "crates/mangle-loader", "crates/mangle", "xtask"]
+exclude = ["vendor/baseview", "vendor/egui-baseview"]
+
+# Vendored copies of the exact revisions nih-plug pins, with drag-and-drop
+# patches applied: baseview gains X11 XDND target support (backported from
+# upstream master), egui-baseview forwards baseview drag events into egui's
+# `hovered_files`/`dropped_files`. See vendor/README.md.
+[patch."https://github.com/RustAudio/baseview.git"]
+baseview = { path = "vendor/baseview" }
+
+[patch."https://github.com/BillyDM/egui-baseview.git"]
+egui-baseview = { path = "vendor/egui-baseview" }

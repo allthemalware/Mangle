@@ -72,9 +72,11 @@ Bitwig picks it up on the next plugin rescan.
 ### Loading samples — other paths
 - **Per-slot LOAD button** (native file picker) — the reliable path, works in
   every host.
-- **Drag & drop** onto the waveform strip — supported, but many hosts don't
-  forward file drops into an embedded plugin window, so it may not fire; use
-  LOAD if so.
+- **Drag & drop** — drag audio files from a file manager or the host's
+  browser onto the editor. Files land in the slot tab under the pointer
+  (or the selected slot), successive slots for multiple files. On Linux/X11
+  this uses a vendored XDND patch (see `vendor/README.md`); Wayland-native
+  hosts are not covered yet.
 - **`MANGLE_SAMPLE=/path/to/file`** environment variable — fills slot 1 on
   load (handy for quick testing from the terminal).
 - **Presets** remember their sample references and reload them automatically

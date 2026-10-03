@@ -43,12 +43,16 @@ these first:
 - **`input.raw_scroll_delta`** — CONFIRMED present in egui 0.31.
 - **`Frame::none()`** — RESOLVED: deprecated in 0.31, now `Frame::new()`.
 - **Drag & drop** — uses `ctx.input(|i| &i.raw).hovered_files /
-  dropped_files`. Compiles in 0.31, BUT native file drops are not forwarded
-  into the embedded plugin window by baseview/the host (no hover highlight
-  observed in Bitwig). Sample loading is therefore done via the per-slot
-  LOAD buttons (rfd native picker) instead, which is host-independent. The
-  drag-drop code is left in place in case a future baseview/host forwards
-  the events.
+  dropped_files`. Originally dead code: the pinned baseview had no X11
+  XDND support and the pinned egui-baseview never translated baseview drag
+  events into egui raw input. Both are now fixed by vendored patched copies
+  in `vendor/` (wired up via `[patch]` in the workspace `Cargo.toml`):
+  baseview gains the XDND target implementation backported from upstream
+  master, egui-baseview forwards `DragEntered/DragMoved/DragLeft/DragDropped`
+  into `hovered_files`/`dropped_files` plus a synthetic `PointerMoved` (no
+  real motion events arrive during an X11 drag — the source grabs the
+  pointer). See `vendor/README.md`. The per-slot LOAD buttons (rfd picker)
+  remain as the host-independent path.
 - **rfd file dialog** — `rfd = "0.15"`. The picker MUST run on a separate
   thread (`std::thread::spawn`), never synchronously inside the egui render
   closure, or it deadlocks/freezes the editor. Results come back through a
