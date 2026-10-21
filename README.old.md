@@ -1,6 +1,6 @@
 # Mangle
 
-[![CI](https://github.com/TheWhyteWolf/Mangle/actions/workflows/ci.yml/badge.svg)](https://github.com/TheWhyteWolf/Mangle/actions/workflows/ci.yml)
+[![CI](https://github.com/allthemalware/Mangle/actions/workflows/ci.yml/badge.svg)](https://github.com/allthemalware/Mangle/actions/workflows/ci.yml)
 
 Granular texture instrument (CLAP). Three grain engines × six sample slots,
 per-engine Loop LFOs, six global LFOs, Drift + Noise modulators, a 32-slot

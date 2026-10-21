@@ -1,6 +1,6 @@
 # Mangle
 
-[![CI](https://github.com/TheWhyteWolf/Mangle/actions/workflows/ci.yml/badge.svg)](https://github.com/TheWhyteWolf/Mangle/actions/workflows/ci.yml)
+[![CI](https://github.com/allthemalware/Mangle/actions/workflows/ci.yml/badge.svg)](https://github.com/allthemalware/Mangle/actions/workflows/ci.yml)
 
 A granular texture instrument in **CLAP** plugin form. Load up to six
 samples, sculpt them with three independent grain engines, and modulate
@@ -125,7 +125,7 @@ dropout or crash. Note your host, sample rate and buffer size in reports.
 
 ## Reporting issues
 
-Open an issue at **[github.com/TheWhyteWolf/Mangle/issues](https://github.com/TheWhyteWolf/Mangle/issues)**.
+Open an issue at **[github.com/allthemalware/Mangle/issues](https://github.com/allthemalware/Mangle/issues)**.
 Include: host + version, OS, sample rate / buffer size, steps to reproduce,
 and (if you can) the patch or a short clip of the artifact.
 
