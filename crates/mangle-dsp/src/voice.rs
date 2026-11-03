@@ -7,6 +7,9 @@
 use crate::curve::LfoState;
 use crate::engine::Lane;
 
+/// Index of the drone voice in [`VoiceManager::voices`].
+pub const DRONE: usize = 16;
+
 pub struct Voice {
     pub note: u8,
     /// Host note id (CLAP), -1 when unknown.
@@ -83,6 +86,7 @@ impl Voice {
 }
 
 pub struct VoiceManager {
+    /// The 16 note voices followed by the drone voice at [`VoiceManager::DRONE`].
     pub voices: Vec<Voice>,
     pub max_voices: usize,
     counter: u64,
@@ -98,11 +102,14 @@ pub struct EndedVoice {
 }
 
 impl VoiceManager {
-    /// All 16 voices are allocated up front so `note_on` never allocates
-    /// on the audio thread (grain pools, offset lists, scratch — all
-    /// pre-sized).
+    /// Index of the drone voice. `note_on` never allocates or steals it.
+    pub const DRONE: usize = DRONE;
+
+    /// All 17 voices (16 notes + the drone) are allocated up front so
+    /// `note_on` never allocates on the audio thread (grain pools, offset
+    /// lists, scratch — all pre-sized).
     pub fn new(max_voices: usize, seed: u64) -> Self {
-        let voices = (0..16)
+        let voices = (0..=Self::DRONE)
             .map(|i| Voice::new(seed ^ (i as u64).wrapping_mul(0xA5A5_5A5A)))
             .collect();
         Self {
@@ -110,6 +117,43 @@ impl VoiceManager {
             max_voices: max_voices.clamp(1, 16),
             counter: 0,
         }
+    }
+
+    /// The drone voice (always `note_id == -1`).
+    pub fn drone_mut(&mut self) -> &mut Voice {
+        &mut self.voices[Self::DRONE]
+    }
+
+    /// True while any note voice (not the drone) holds its gate.
+    pub fn any_note_gated(&self) -> bool {
+        self.voices[..Self::DRONE].iter().any(|v| v.gate)
+    }
+
+    /// Start the drone like a note-on (note 60, full velocity), without
+    /// touching the note voices' allocation order.
+    pub fn start_drone(&mut self, voice_random: f32) -> &mut Voice {
+        let v = self.drone_mut();
+        v.note = 60;
+        v.note_id = -1;
+        v.channel = 0;
+        v.velocity = 1.0;
+        v.voice_random = voice_random;
+        v.pressure = 0.0;
+        v.tuning = 0.0;
+        v.expr_volume = 1.0;
+        v.expr_pan = 0.0;
+        v.gate = true;
+        v.was_sounding = true;
+        v.mod_offsets.clear();
+        v.last_scan = [(0.0, 0.0); 3];
+        v.trig_prev = [false; 3];
+        for lane in v.lanes.iter_mut() {
+            lane.soft_reset();
+        }
+        for lfo in v.loop_lfos.iter_mut() {
+            *lfo = LfoState::default();
+        }
+        v
     }
 
     pub fn set_max_voices(&mut self, n: usize) {
@@ -138,7 +182,7 @@ impl VoiceManager {
         // releasing tail is the quietest thing to cut. Voices beyond
         // `max_voices` (after the limit was lowered mid-flight) ring out but are
         // never re-allocated.
-        let limit = self.max_voices.min(self.voices.len());
+        let limit = self.max_voices.min(Self::DRONE);
         let idx = if let Some(i) = self.voices[..limit].iter().position(|v| !v.sounding()) {
             i
         } else {
@@ -185,7 +229,7 @@ impl VoiceManager {
     /// Gate off the matching voice (by note id when given, else by note and
     /// channel).
     pub fn note_off(&mut self, note: u8, note_id: i32, channel: u8) {
-        for v in self.voices.iter_mut() {
+        for v in self.voices[..Self::DRONE].iter_mut() {
             let hit = if note_id >= 0 {
                 v.note_id == note_id
             } else {
@@ -218,7 +262,7 @@ mod tests {
         assert!(vm.voices.iter().any(|v| v.note == 67 && v.gate));
         assert!(!vm.voices.iter().any(|v| v.note == 60 && v.gate));
         // Pre-allocated pool: note_on never grows the vec.
-        assert_eq!(vm.voices.len(), 16);
+        assert_eq!(vm.voices.len(), 17);
     }
 
     #[test]
@@ -261,6 +305,25 @@ mod tests {
             !vm.voices.iter().any(|v| v.note == 64 && v.note_id == 2),
             "released voice should have been reused"
         );
+    }
+
+    #[test]
+    fn note_on_never_returns_the_drone_voice() {
+        let mut vm = VoiceManager::new(16, 1);
+        for i in 0..40 {
+            vm.note_on(40 + (i % 30) as u8, i, 0, 0.8, 0.0);
+            assert!(!vm.voices[VoiceManager::DRONE].gate);
+        }
+        assert_eq!(vm.drone_mut().note_id, -1);
+        assert_eq!(vm.voices[..16].iter().filter(|v| v.gate).count(), 16);
+    }
+
+    #[test]
+    fn note_off_by_note_spares_the_drone() {
+        let mut vm = VoiceManager::new(4, 1);
+        vm.start_drone(0.0);
+        vm.note_off(60, -1, 0);
+        assert!(vm.voices[VoiceManager::DRONE].gate);
     }
 
     #[test]

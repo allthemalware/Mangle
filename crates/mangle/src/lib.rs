@@ -498,6 +498,27 @@ impl Mangle {
         }
     }
 
+    /// Drone: with Global On and Key at 0 % the engines free-run when no note
+    /// is held. Starts the drone voice or releases it as the condition changes.
+    fn update_drone(&mut self, gate_sync: &[bool; 3]) {
+        let on_pos = self.params.table.pos(mp::pid(Module::Global, 0, 0));
+        let key_pos = self.params.table.pos(mp::pid(Module::Global, 0, 1));
+        let wanted = self.base.values[on_pos] >= 0.5
+            && self.base.values[key_pos] < 1e-4
+            && !self.vm.any_note_gated();
+        if wanted && !self.vm.drone_mut().gate {
+            let vr = self.rng.bipolar();
+            let v = self.vm.start_drone(vr);
+            for (e, gs) in gate_sync.iter().enumerate() {
+                if *gs {
+                    v.loop_lfos[e].trig();
+                }
+            }
+        } else if !wanted {
+            self.vm.drone_mut().gate = false;
+        }
+    }
+
     /// Apply one note/automation event. Called from the control-chunk loop at
     /// the event's sample offset so note timing is sample-accurate. `gate_sync`
     /// is the per-engine Gate-Sync flag set (resolved once from the base patch).
@@ -532,6 +553,8 @@ impl Mangle {
                         v.loop_lfos[e].trig();
                     }
                 }
+                // A played note takes over from the drone.
+                self.vm.drone_mut().gate = false;
             }
             NoteEvent::NoteOff {
                 note,
@@ -957,6 +980,8 @@ impl Mangle {
             *gs = self.base.values[pos] >= 0.5;
         }
 
+        self.update_drone(&gate_sync);
+
         // 4. Events are applied inside the control-chunk loop (step 7) at their
         //    sample offsets, via `apply_event` — so note timing is sample-
         //    accurate rather than quantized to the block. `gate_sync` feeds it.
@@ -1304,6 +1329,8 @@ impl Mangle {
             self.apply_event(ev, &gate_sync, io);
             next_event = io.next_event();
         }
+        // Notes released in this block hand back to the drone straight away.
+        self.update_drone(&gate_sync);
 
         // 8. Voice termination (lets the host recycle CLAP note ids).
         for voice in self.vm.voices.iter_mut() {
@@ -1430,6 +1457,82 @@ mod tests {
             out.extend_from_slice(&l);
             out.extend_from_slice(&r);
         }
+    }
+
+    fn rms(out: &[f32]) -> f32 {
+        (out.iter().map(|s| s * s).sum::<f32>() / out.len().max(1) as f32).sqrt()
+    }
+
+    fn drone_setup(m: &mut Mangle, on: bool, key: f32) {
+        let on_pos = m.params.table.pos(mp::pid(Module::Global, 0, 0));
+        let key_pos = m.params.table.pos(mp::pid(Module::Global, 0, 1));
+        m.base.values[on_pos] = if on { 1.0 } else { 0.0 };
+        m.base.values[key_pos] = key;
+    }
+
+    #[test]
+    fn drone_runs_without_notes_at_key_zero() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        let out = render_setup(&mut m, &mut io, 24_000 / 512 * 512, 512, &|m| {
+            drone_setup(m, true, 0.0)
+        });
+        assert!(out.iter().all(|s| s.is_finite()));
+        assert!(rms(&out) > 0.01, "rms {}", rms(&out));
+        assert!(m.vm.voices[VoiceManager::DRONE].gate);
+    }
+
+    #[test]
+    fn no_drone_when_key_tracks() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        let out = render_setup(&mut m, &mut io, 24_000 / 512 * 512, 512, &|_| {});
+        assert!(rms(&out) < 1e-6);
+        assert!(!m.vm.voices[VoiceManager::DRONE].gate);
+    }
+
+    #[test]
+    fn drone_respects_global_on() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        let out = render_setup(&mut m, &mut io, 24_000 / 512 * 512, 512, &|m| {
+            drone_setup(m, false, 0.0)
+        });
+        assert!(rms(&out) < 1e-6);
+        assert!(!m.vm.voices[VoiceManager::DRONE].gate);
+    }
+
+    #[test]
+    fn note_takes_over_from_drone() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        let setup = |m: &mut Mangle| drone_setup(m, true, 0.0);
+        render_setup(&mut m, &mut io, 2048, 512, &setup);
+        assert!(m.vm.voices[VoiceManager::DRONE].gate);
+
+        io.input.push_back(note_on());
+        render_setup(&mut m, &mut io, 512, 512, &setup);
+        assert!(!m.vm.voices[VoiceManager::DRONE].gate);
+        assert!(m.vm.voices[..VoiceManager::DRONE].iter().any(|v| v.gate));
+
+        io.input.push_back(NoteEvent::NoteOff {
+            timing: 0,
+            voice_id: Some(5),
+            channel: 0,
+            note: 45,
+            velocity: 0.0,
+        });
+        render_setup(&mut m, &mut io, 512, 512, &setup);
+        assert!(m.vm.voices[VoiceManager::DRONE].gate);
+
+        render_setup(&mut m, &mut io, 48_000 / 512 * 512, 512, &setup);
+        assert!(!io.sent.iter().any(|e| matches!(
+            e,
+            NoteEvent::VoiceTerminated {
+                voice_id: None | Some(-1),
+                ..
+            }
+        )));
     }
 
     #[test]
