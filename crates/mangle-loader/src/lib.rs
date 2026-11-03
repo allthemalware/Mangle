@@ -68,11 +68,14 @@ impl From<std::io::Error> for LoadError {
 const PHASES: usize = 1024;
 
 /// Dot product with independent lanes so the compiler can vectorize it.
+// `as_chunks` needs a newer Rust than the workspace supports.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 fn dot(a: &[f32], b: &[f32]) -> f32 {
     let mut lanes = [0.0f32; 8];
-    let (ac, ar) = a.as_chunks::<8>();
-    let (bc, br) = b.as_chunks::<8>();
-    for (x, y) in ac.iter().zip(bc) {
+    let ac = a.chunks_exact(8);
+    let bc = b.chunks_exact(8);
+    let (ar, br) = (ac.remainder(), bc.remainder());
+    for (x, y) in ac.zip(bc) {
         for l in 0..8 {
             lanes[l] += x[l] * y[l];
         }
@@ -173,8 +176,63 @@ pub fn hash_file(path: &Path) -> std::io::Result<u64> {
         }
         hasher.update(&buf[..n]);
     }
-    let hash = hasher.finalize();
-    Ok(u64::from_le_bytes(hash.as_bytes()[..8].try_into().unwrap()))
+    Ok(truncate_hash(&hasher.finalize()))
+}
+
+/// BLAKE3 of `bytes`, truncated exactly like `hash_file`.
+pub fn hash_bytes(bytes: &[u8]) -> u64 {
+    truncate_hash(&blake3::hash(bytes))
+}
+
+fn truncate_hash(hash: &blake3::Hash) -> u64 {
+    u64::from_le_bytes(hash.as_bytes()[..8].try_into().unwrap())
+}
+
+// ------------------------------------------------------------- base64 ---
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Standard RFC 4648 base64 with `=` padding.
+pub fn b64_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16
+            | (*chunk.get(1).unwrap_or(&0) as u32) << 8
+            | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(B64[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Inverse of `b64_encode`; `None` on any invalid character, bad padding or length.
+pub fn b64_decode(text: &str) -> Option<Vec<u8>> {
+    let t = text.as_bytes();
+    if t.len() & 3 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(t.len() / 4 * 3);
+    let groups = t.len() / 4;
+    for (gi, g) in t.chunks(4).enumerate() {
+        let pad = g.iter().rev().take_while(|&&c| c == b'=').count();
+        if pad > 2 || (pad > 0 && gi + 1 != groups) {
+            return None;
+        }
+        let mut n = 0u32;
+        for &c in &g[..4 - pad] {
+            let v = B64.iter().position(|&b| b == c)? as u32;
+            n = n << 6 | v;
+        }
+        n <<= 6 * pad as u32;
+        let bytes = n.to_be_bytes();
+        out.extend_from_slice(&bytes[1..4 - pad]);
+    }
+    Some(out)
 }
 
 // --------------------------------------------------------------- load ---
@@ -197,12 +255,42 @@ fn load_sample_with_cap(
     target_rate: f32,
     max_seconds: f64,
 ) -> Result<LoadedSample, LoadError> {
-    let mut warnings = Vec::new();
-
     let file = std::fs::File::open(path)?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let ext = path.extension().and_then(|e| e.to_str());
+    let mut loaded = decode_stream(mss, ext, target_rate, max_seconds)?;
+    loaded.content_hash = hash_file(path)?;
+    Ok(loaded)
+}
+
+/// Decode, truncate (300 s cap), resample to `target_rate` and hash audio held
+/// in memory — e.g. a sample embedded in a preset. `ext_hint` is the original
+/// file extension (probe hint). Same output, caps and warnings as
+/// `load_sample`; `content_hash` is `hash_bytes(bytes)`, which equals
+/// `hash_file` of the original file.
+pub fn load_sample_from_bytes(
+    bytes: &[u8],
+    ext_hint: Option<&str>,
+    target_rate: f32,
+) -> Result<LoadedSample, LoadError> {
+    let cursor = std::io::Cursor::new(bytes.to_vec());
+    let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+    let mut loaded = decode_stream(mss, ext_hint, target_rate, MAX_SECONDS)?;
+    loaded.content_hash = hash_bytes(bytes);
+    Ok(loaded)
+}
+
+/// Shared decode path; `content_hash` is left 0 for the caller to fill in.
+fn decode_stream(
+    mss: MediaSourceStream,
+    ext_hint: Option<&str>,
+    target_rate: f32,
+    max_seconds: f64,
+) -> Result<LoadedSample, LoadError> {
+    let mut warnings = Vec::new();
+
     let mut hint = Hint::new();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+    if let Some(ext) = ext_hint {
         hint.with_extension(ext);
     }
     let probed = symphonia::default::get_probe()
@@ -301,8 +389,6 @@ fn load_sample_with_cap(
     }
     let len = l.len();
 
-    let content_hash = hash_file(path)?;
-
     Ok(LoadedSample {
         slot: SampleSlot {
             data: [l, r],
@@ -313,7 +399,7 @@ fn load_sample_with_cap(
             gain: 1.0,
             mono: n_ch == 1, // single-channel source duplicated to both sides
         },
-        content_hash,
+        content_hash: 0,
         src_rate: src_rate as f32,
         warnings,
     })
@@ -527,6 +613,47 @@ mod tests {
             Err(LoadError::Decode(_)) => {}
             Err(e) => panic!("expected Decode error, got {e:?}"),
             Ok(_) => panic!("expected Decode error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn bytes_and_file_loads_match() {
+        let p = tmp("bytes_match.wav");
+        write_wav_f32(&p, 44_100, &[sine(440.0, 44_100.0, 0.2, 0.5)]);
+        let a = load_sample(&p, 48_000.0).unwrap();
+        let raw = std::fs::read(&p).unwrap();
+        let b = load_sample_from_bytes(&raw, Some("wav"), 48_000.0).unwrap();
+        assert_eq!(a.slot.data, b.slot.data);
+        assert_eq!(a.slot.loop_end, b.slot.loop_end);
+        assert_eq!(a.slot.mono, b.slot.mono);
+        assert_eq!(a.content_hash, b.content_hash);
+        assert_eq!(hash_bytes(&raw), hash_file(&p).unwrap());
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn garbage_bytes_error() {
+        assert!(load_sample_from_bytes(&[7u8; 512], None, 48_000.0).is_err());
+    }
+
+    #[test]
+    fn base64_round_trip_and_vectors() {
+        let mut x = 12345u32;
+        for len in 0..=300 {
+            let v: Vec<u8> = (0..len)
+                .map(|_| {
+                    x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+                    (x >> 24) as u8
+                })
+                .collect();
+            assert_eq!(b64_decode(&b64_encode(&v)).unwrap(), v);
+        }
+        assert_eq!(b64_encode(b""), "");
+        assert_eq!(b64_encode(b"f"), "Zg==");
+        assert_eq!(b64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(b64_decode("Zm9vYmE=").unwrap(), b"fooba");
+        for bad in ["Zg=", "Z!==", "Zg==Zg==", "=Zg=", "Zg=A"] {
+            assert!(b64_decode(bad).is_none(), "{bad}");
         }
     }
 
