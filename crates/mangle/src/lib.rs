@@ -58,6 +58,9 @@ pub mod loading;
 
 use feed::{EngineFeed, FeedFrame};
 
+/// Longest loop window, in seconds of the slot's sample.
+pub(crate) const MAX_LOOP_SECONDS: f32 = 100.0;
+
 /// Per-slot display data for the waveform strip (peaks of the mono mix).
 /// GUI-only; never serialized.
 #[derive(Clone)]
@@ -1106,7 +1109,10 @@ impl Mangle {
                     // `clamp(len + 1, len)`, which panics (min > max) on the audio thread.
                     let ls = ((st.loop_start * len as f32) as usize).min(len - 1);
                     slot.loop_start = ls;
-                    slot.loop_end = ((st.loop_end * len as f32) as usize).clamp(ls + 1, len);
+                    let max_len = (MAX_LOOP_SECONDS * self.sample_rate) as usize;
+                    slot.loop_end = ((st.loop_end * len as f32) as usize)
+                        .clamp(ls + 1, len)
+                        .min(ls + max_len.max(1));
                 }
                 slot.gain = st.gain;
             }
@@ -2060,6 +2066,21 @@ mod tests {
             render_setup(&mut m, &mut io, 512, 512, &set);
         }
         assert!(m.gmod.last_lfo[0].0 > 0.95, "held Trig must not re-fire");
+    }
+
+    #[test]
+    fn loop_window_is_capped_at_100_seconds() {
+        let mut m = Mangle::default();
+        m.prepare(8000.0);
+        m.bank.slots[0] = Some(SampleSlot::constant(0.5, 150 * 8000, 8000.0));
+        let mut io = Scripted::default();
+        render_setup(&mut m, &mut io, 64, 64, &|m| {
+            let t = &m.params.table;
+            m.base.values[t.pos(mp::pid(Module::Slot, 0, 1))] = 0.0;
+            m.base.values[t.pos(mp::pid(Module::Slot, 0, 2))] = 1.0;
+        });
+        let slot = m.bank.slots[0].as_ref().unwrap();
+        assert_eq!(slot.loop_end - slot.loop_start, 100 * 8000);
     }
 
     #[test]

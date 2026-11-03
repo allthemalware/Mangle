@@ -479,7 +479,9 @@ fn section_label(ui: &mut Ui, label: &str) {
 enum LoopDrag {
     Start,
     End,
-    Move(f32), // grab offset from loop start, in normalized units
+    /// Grab offset from the loop centre, window width and pointer y at the
+    /// start of the drag (normalized units / pixels).
+    Move(f32, f32, f32),
 }
 
 /// Pointer tool on the curve canvas.
@@ -1184,6 +1186,23 @@ fn waveform_strip(
         frame(ui, rect, BORDER);
     }
 
+    // View window (saved per slot): maps sample-normalized positions to x.
+    let (v0, v1) = ex.slot_views[sel];
+    let (v0, v1) = if v0.is_finite() && v1.is_finite() && v1 - v0 > 1e-4 {
+        (v0.clamp(0.0, 1.0), v1.clamp(0.0, 1.0))
+    } else {
+        (0.0, 1.0)
+    };
+    let span = (v1 - v0).max(1e-4);
+    let to_x = |n: f32| rect.left() + (n - v0) / span * rect.width();
+    let shift = ui.input(|i| i.modifiers.shift);
+    let zoom_about = |ex: &mut mangle_dsp::state::ExtraState, anchor: f32, factor: f32| {
+        let new_span = (span * factor).clamp(0.001, 1.0);
+        let frac = ((anchor - v0) / span).clamp(0.0, 1.0);
+        let n0 = (anchor - frac * new_span).clamp(0.0, 1.0 - new_span);
+        ex.slot_views[sel] = (n0, n0 + new_span);
+    };
+
     // Peaks.
     let waves = params.waveforms.read().ok();
     let have = waves.as_ref().map(|ws| ws[sel].is_some()).unwrap_or(false);
@@ -1191,9 +1210,13 @@ fn waveform_strip(
         if let Some(wsum) = &ws[sel] {
             let mid = rect.center().y;
             let half = rect.height() * 0.46;
-            let n = wsum.peaks.len().max(1);
+            let n = wsum.peaks.len();
             for x in 0..rect.width() as usize {
-                let i = x * n / rect.width().max(1.0) as usize;
+                if n == 0 {
+                    break;
+                }
+                let pos = v0 + x as f32 / rect.width().max(1.0) * span;
+                let i = (pos * n as f32) as usize;
                 let (lo, hi) = wsum.peaks[i.min(n - 1)];
                 let x = rect.left() + x as f32;
                 ui.painter().line_segment(
@@ -1218,8 +1241,8 @@ fn waveform_strip(
     let cp_start = params.cp(Module::Slot, sel as u8, 1);
     let cp_end = params.cp(Module::Slot, sel as u8, 2);
     let (s, e) = (cp_start.norm(), cp_end.norm());
-    let sx = rect.left() + s * rect.width();
-    let ex_ = rect.left() + e * rect.width();
+    let sx = to_x(s).clamp(rect.left(), rect.right());
+    let ex_ = to_x(e).clamp(rect.left(), rect.right());
     fill(
         ui,
         Rect::from_min_max(
@@ -1228,7 +1251,10 @@ fn waveform_strip(
         ),
         Color32::from_rgba_unmultiplied(0xa4, 0xbf, 0x55, 22),
     );
-    for x in [sx, ex_] {
+    for x in [to_x(s), to_x(e)] {
+        if x < rect.left() || x > rect.right() {
+            continue;
+        }
         ui.painter().line_segment(
             [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
             Stroke::new(2.0_f32, ACCENT),
@@ -1247,7 +1273,10 @@ fn waveform_strip(
             if g.slot as usize != sel || !g.pos.is_finite() {
                 continue;
             }
-            let x = rect.left() + g.pos * rect.width();
+            let x = to_x(g.pos);
+            if x < rect.left() || x > rect.right() {
+                continue;
+            }
             let y0 = rect.top() + 3.0 + e as f32 * 9.0 + g.channel as f32 * 2.0;
             let a = ((1.0 - g.age) * 200.0).clamp(40.0, 200.0) as u8;
             ui.painter().line_segment(
@@ -1262,7 +1291,10 @@ fn waveform_strip(
                 if !c.is_finite() {
                     continue;
                 }
-                let x = rect.left() + c * rect.width();
+                let x = to_x(c);
+                if x < rect.left() || x > rect.right() {
+                    continue;
+                }
                 let (y0, y1) = if playhead {
                     (rect.top(), rect.bottom())
                 } else {
@@ -1276,18 +1308,66 @@ fn waveform_strip(
         }
     }
 
-    // Loop drag: edges resize, body moves.
-    let norm_at = |p: Pos2| ((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-    if resp.drag_started() {
+    // Loop drag: edges resize, body moves (horizontal) and resizes about its
+    // centre (vertical: up grows, down shrinks). Shift-drag / Shift-wheel
+    // zooms the view, double-click resets it.
+    let norm_at = |p: Pos2| (v0 + (p.x - rect.left()) / rect.width() * span).clamp(0.0, 1.0);
+    let len = params
+        .waveforms
+        .read()
+        .ok()
+        .and_then(|ws| ws[sel].as_ref().map(|w| w.len_samples))
+        .unwrap_or(0);
+    let sr = f32::from_bits(params.sr_bits.load(std::sync::atomic::Ordering::Acquire));
+    let max_w = if len > 0 && sr.is_finite() && sr > 0.0 {
+        (crate::MAX_LOOP_SECONDS * sr / len as f32).clamp(0.001, 1.0)
+    } else {
+        1.0
+    };
+    if resp.double_clicked() {
+        ex.slot_views[sel] = (0.0, 1.0);
+        *ex_changed = true;
+    }
+    if resp.hovered() {
+        // Shift can arrive on the wheel event itself rather than the frame's
+        // modifier state; the delta may also be on either axis.
+        let amount: f32 = ui.input(|i| {
+            i.events
+                .iter()
+                .map(|ev| match ev {
+                    egui::Event::MouseWheel {
+                        unit,
+                        delta,
+                        modifiers,
+                    } if modifiers.shift || i.modifiers.shift => {
+                        let px = match unit {
+                            egui::MouseWheelUnit::Point => 1.0,
+                            egui::MouseWheelUnit::Line => 24.0,
+                            egui::MouseWheelUnit::Page => 240.0,
+                        };
+                        (delta.x + delta.y) * px
+                    }
+                    _ => 0.0,
+                })
+                .sum()
+        });
+        if amount != 0.0 {
+            if let Some(p) = resp.hover_pos() {
+                zoom_about(ex, norm_at(p), (-amount * 0.002).exp());
+                *ex_changed = true;
+            }
+        }
+    }
+    if resp.drag_started() && !shift {
         if let Some(p) = resp.interact_pointer_pos() {
             let n = norm_at(p);
-            let grab = 6.0 / rect.width();
+            let grab = 6.0 / rect.width() * span;
             st.loop_drag = if (n - s).abs() < grab {
                 Some(LoopDrag::Start)
             } else if (n - e).abs() < grab {
                 Some(LoopDrag::End)
             } else if n > s && n < e {
-                Some(LoopDrag::Move(n - s))
+                Some(LoopDrag::Move(n - (s + e) * 0.5, e - s, p.y))
             } else {
                 None
             };
@@ -1298,14 +1378,22 @@ fn waveform_strip(
         }
     }
     if resp.dragged() {
-        if let (Some(mode), Some(p)) = (st.loop_drag, resp.interact_pointer_pos()) {
+        if shift && st.loop_drag.is_none() {
+            let dx = resp.drag_delta().x;
+            if dx != 0.0 {
+                if let Some(p) = resp.interact_pointer_pos() {
+                    zoom_about(ex, norm_at(p), (-dx * 0.01).exp());
+                    *ex_changed = true;
+                }
+            }
+        } else if let (Some(mode), Some(p)) = (st.loop_drag, resp.interact_pointer_pos()) {
             let n = norm_at(p);
             match mode {
-                LoopDrag::Start => cp_start.set(setter, n.min(e - 0.001)),
-                LoopDrag::End => cp_end.set(setter, n.max(s + 0.001)),
-                LoopDrag::Move(off) => {
-                    let width = e - s;
-                    let ns = (n - off).clamp(0.0, 1.0 - width);
+                LoopDrag::Start => cp_start.set(setter, n.min(e - 0.001).max(e - max_w)),
+                LoopDrag::End => cp_end.set(setter, n.max(s + 0.001).min(s + max_w)),
+                LoopDrag::Move(off, width0, y0) => {
+                    let width = (width0 - (p.y - y0) * 0.005 * span).clamp(0.001, max_w);
+                    let ns = (n - off - width * 0.5).clamp(0.0, 1.0 - width);
                     cp_start.set(setter, ns);
                     cp_end.set(setter, ns + width);
                 }
@@ -2867,6 +2955,156 @@ mod gui_tests {
             .unwrap()
             .iter()
             .all(|p| !trig_ptrs.contains(p)));
+    }
+
+    fn strip_frame(
+        ctx: &Context,
+        setter: &ParamSetter,
+        params: &Arc<MangleParams>,
+        st: &mut UiState,
+        time: &mut f64,
+        events: Vec<Event>,
+    ) {
+        curve_frame(ctx, setter, params, st, time, events);
+    }
+
+    /// Press, move and release over separate frames so egui sees a real drag.
+    fn drag_frames(
+        env: (&Context, &ParamSetter, &Arc<MangleParams>),
+        st: &mut UiState,
+        time: &mut f64,
+        from: Pos2,
+        to: Pos2,
+    ) {
+        let (ctx, setter, params) = env;
+        let steps = 10;
+        strip_frame(
+            ctx,
+            setter,
+            params,
+            st,
+            time,
+            vec![Event::PointerMoved(from), press(from, true)],
+        );
+        for i in 1..=steps {
+            let p = from + (to - from) * (i as f32 / steps as f32);
+            strip_frame(ctx, setter, params, st, time, vec![Event::PointerMoved(p)]);
+        }
+        strip_frame(ctx, setter, params, st, time, vec![press(to, false)]);
+    }
+
+    fn start_end_ptrs(params: &MangleParams) -> (ParamPtr, ParamPtr) {
+        let ptr = |idx| match params.cp(Module::Slot, 0, idx).pr {
+            PRef::F(p) => p.as_ptr(),
+            _ => panic!("loop points are floats"),
+        };
+        (ptr(1), ptr(2))
+    }
+
+    fn last_set(host: &TestHost, p: ParamPtr) -> f32 {
+        host.set_log
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(q, _)| *q == p)
+            .map(|(_, v)| *v)
+            .expect("param was not set")
+    }
+
+    fn with_long_sample(params: &MangleParams, secs: usize, rate: f32) {
+        params.waveforms.write().unwrap()[0] = Some(crate::WaveSummary {
+            peaks: vec![(-0.5, 0.5); 64],
+            len_samples: secs * rate as usize,
+        });
+        params
+            .sr_bits
+            .store(rate.to_bits(), std::sync::atomic::Ordering::Release);
+    }
+
+    #[test]
+    fn vertical_drag_in_loop_body_resizes_about_centre() {
+        let params = Arc::new(MangleParams::new());
+        with_long_sample(&params, 10, 8000.0);
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState::default();
+        let mut time = 0.0;
+        strip_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        strip_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        let (ps, pe) = start_end_ptrs(&params);
+        // Down shrinks the default full window symmetrically about 0.5.
+        drag_frames(
+            (&ctx, &setter, &params),
+            &mut st,
+            &mut time,
+            Pos2::new(450.0, 100.0),
+            Pos2::new(450.0, 120.0),
+        );
+        let (s, e) = (last_set(&host, ps), last_set(&host, pe));
+        assert!(e - s < 0.99 && e - s > 0.5, "{s} {e}");
+        assert!(((s + e) * 0.5 - 0.5).abs() < 0.02, "{s} {e}");
+    }
+
+    #[test]
+    fn loop_resize_is_clamped_to_100_seconds() {
+        let params = Arc::new(MangleParams::new());
+        with_long_sample(&params, 150, 8000.0);
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState::default();
+        let mut time = 0.0;
+        strip_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        strip_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        let (ps, pe) = start_end_ptrs(&params);
+        drag_frames(
+            (&ctx, &setter, &params),
+            &mut st,
+            &mut time,
+            Pos2::new(450.0, 100.0),
+            Pos2::new(450.0, 70.0),
+        );
+        let (s, e) = (last_set(&host, ps), last_set(&host, pe));
+        assert!(e - s <= 100.0 / 150.0 + 1e-4, "{s} {e}");
+    }
+
+    #[test]
+    fn shift_wheel_zooms_and_double_click_resets_view() {
+        let params = Arc::new(MangleParams::new());
+        with_long_sample(&params, 10, 8000.0);
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState::default();
+        let mut time = 0.0;
+        strip_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        strip_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        let sel = st.selected_slot;
+        let at = Pos2::new(450.0, 120.0);
+        strip_frame(
+            &ctx,
+            &setter,
+            &params,
+            &mut st,
+            &mut time,
+            vec![
+                Event::PointerMoved(at),
+                Event::MouseWheel {
+                    unit: MouseWheelUnit::Point,
+                    delta: vec2(0.0, 300.0),
+                    modifiers: Modifiers::SHIFT,
+                },
+            ],
+        );
+        let v = st.extra.slot_views[sel];
+        assert!(v.1 - v.0 < 0.9, "{v:?}");
+        let mut ev = Vec::new();
+        click(&mut ev, at.x, at.y);
+        click(&mut ev, at.x, at.y);
+        strip_frame(&ctx, &setter, &params, &mut st, &mut time, ev);
+        assert_eq!(st.extra.slot_views[sel], (0.0, 1.0));
     }
 
     fn texts(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
