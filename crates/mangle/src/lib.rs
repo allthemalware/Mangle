@@ -34,7 +34,9 @@ use mangle_dsp::modengine::{
     apply_global, apply_voice, decode_matrix, fill_global_voice_sources, fill_voice_sources,
     modulated_filter, DecodedRow, GlobalMod, SourceValues, VoiceSourceInputs,
 };
-use mangle_dsp::params::{self as mp, flags, Map, Module, ParamInfo, ParamTable, Patch};
+use mangle_dsp::params::{
+    self as mp, flags, Map, Module, ParamInfo, ParamTable, Patch, LFO_TRIG_IDX,
+};
 use mangle_dsp::resolve;
 use mangle_dsp::rng::Rng;
 use mangle_dsp::sample::{SampleBank, SampleSlot, ALGO_NAMES};
@@ -110,6 +112,9 @@ pub struct MangleParams {
     /// voices on its next block — prevents grains/notes hanging over a
     /// randomize. Consumed (cleared) in `process`.
     pub panic: AtomicBool,
+    /// GUI LFO trigger requests, consumed once per block: bits 0-2 restart
+    /// Loop LFO 1-3 in every gated voice, bits 3-8 restart LFO 1-6.
+    pub lfo_trig_requests: AtomicU32,
     /// Drag-and-drop / dialog loads: the GUI decodes + resamples, pushes
     /// here, and the audio thread swaps the sample into the bank on its
     /// next block (no audio-thread file IO). Drained via try_lock.
@@ -269,6 +274,7 @@ impl MangleParams {
             extra: RwLock::new(ExtraState::default()),
             extra_gen: AtomicU64::new(1),
             panic: AtomicBool::new(false),
+            lfo_trig_requests: AtomicU32::new(0),
             pending_loads: std::sync::Mutex::new(Vec::new()),
             sr_bits: AtomicU32::new(48_000f32.to_bits()),
             dialog_results: std::sync::Mutex::new(Vec::new()),
@@ -391,6 +397,8 @@ pub struct Mangle {
     smooth_coef: f32,
     /// Last seen `extra` generation (curve sync).
     seen_gen: u64,
+    /// Previous block's LFO 1-6 Trig values, for rising-edge detection.
+    prev_lfo_trig: [bool; 6],
     rng: Rng,
     sample_rate: f32,
 }
@@ -428,6 +436,7 @@ impl Default for Mangle {
             cur_stereo: 1.0,
             smooth_coef: 1.0 - (-1.0f32 / (0.005 * 48_000.0)).exp(),
             seen_gen: 0,
+            prev_lfo_trig: [false; 6],
             rng: Rng::new(0x564F_5944), // "VOYD"
             sample_rate: 48_000.0,
             params,
@@ -894,6 +903,27 @@ impl Mangle {
             }
         }
 
+        // LFO Trig: host/GUI edge-triggered restarts.
+        let gui_trig = self.params.lfo_trig_requests.swap(0, Ordering::AcqRel);
+        for i in 0..6usize {
+            let pos = self
+                .params
+                .table
+                .pos(mp::pid(Module::Lfo, i as u8, LFO_TRIG_IDX));
+            let on = self.base.values[pos] >= 0.5;
+            if (on && !self.prev_lfo_trig[i]) || gui_trig & (1 << (3 + i)) != 0 {
+                self.gmod.trig_lfo(i);
+            }
+            self.prev_lfo_trig[i] = on;
+        }
+        for v in self.vm.voices.iter_mut().filter(|v| v.gate) {
+            for n in 0..3usize {
+                if gui_trig & (1 << n) != 0 {
+                    v.loop_lfos[n].trig();
+                }
+            }
+        }
+
         // 2. Decode matrix rows once per block (the `rows` slice is bound
         //    after the event loop, which needs &mut self).
         self.n_rows = decode_matrix(&self.base, &self.params.table, &mut self.rows);
@@ -1057,6 +1087,18 @@ impl Mangle {
                 };
                 fill_voice_sources(&mut sv, &vi, &self.scratch_v, &self.params.table);
 
+                for n in 0..3usize {
+                    let pos =
+                        self.params
+                            .table
+                            .pos(mp::pid(Module::LoopLfo, n as u8, LFO_TRIG_IDX));
+                    let on = self.scratch_v.values[pos] >= 0.5;
+                    if on && !voice.trig_prev[n] {
+                        voice.loop_lfos[n].trig();
+                    }
+                    voice.trig_prev[n] = on;
+                }
+
                 let mut loop_pos_l = [0.0f32; 3];
                 let mut loop_pos_r = [0.0f32; 3];
                 self.scratch_l.values.clear();
@@ -1088,6 +1130,37 @@ impl Mangle {
                         1.0
                     };
                 for e in 0..3usize {
+                    let gate_pos = self.params.table.pos(mp::pid(Module::Grain, e as u8, 0));
+                    let gate_on = g.on && voice.gate;
+                    let active = gate_on
+                        && (self.scratch_l.values[gate_pos] >= 0.5
+                            || self.scratch_r.values[gate_pos] >= 0.5);
+                    // Loop LFO params from the left-modulated patch;
+                    // St.Phase still splits the channels. It keeps ticking
+                    // while the engine is idle so it stays a usable source.
+                    let (lfop, transport) = resolve::lfo_params(
+                        &self.scratch_l,
+                        &self.params.table,
+                        Module::LoopLfo,
+                        e as u8,
+                        bpm,
+                    );
+                    let scan = match (transport, t_sec) {
+                        (true, Some(sec)) => {
+                            let phase = (sec * lfop.rate_hz as f64).rem_euclid(1.0) as f32;
+                            voice.loop_lfos[e].tick_transport(
+                                &self.loop_curves[e],
+                                &lfop,
+                                phase,
+                                dt,
+                            )
+                        }
+                        _ => voice.loop_lfos[e].tick(&self.loop_curves[e], &lfop, dt),
+                    };
+                    voice.last_scan[e] = scan;
+                    if !active && !voice.lanes[e].is_ringing() {
+                        continue;
+                    }
                     let (mut lane_l, _) = resolve::lane_params(
                         &self.scratch_l,
                         &self.params.table,
@@ -1110,31 +1183,6 @@ impl Mangle {
                     lane_r.loop_pos = loop_pos_r[e];
                     lane_l.level *= expr_gl;
                     lane_r.level *= expr_gr;
-                    if !lane_l.gate && !lane_r.gate && !voice.lanes[e].is_ringing() {
-                        continue;
-                    }
-                    // Loop LFO params from the left-modulated patch;
-                    // St.Phase still splits the channels.
-                    let (lfop, transport) = resolve::lfo_params(
-                        &self.scratch_l,
-                        &self.params.table,
-                        Module::LoopLfo,
-                        e as u8,
-                        bpm,
-                    );
-                    let scan = match (transport, t_sec) {
-                        (true, Some(sec)) => {
-                            let phase = (sec * lfop.rate_hz as f64).rem_euclid(1.0) as f32;
-                            voice.loop_lfos[e].tick_transport(
-                                &self.loop_curves[e],
-                                &lfop,
-                                phase,
-                                dt,
-                            )
-                        }
-                        _ => voice.loop_lfos[e].tick(&self.loop_curves[e], &lfop, dt),
-                    };
-                    voice.last_scan[e] = scan;
                     let [buf_l, buf_r] = &mut eng_chunk[e];
                     voice.lanes[e].process(
                         &[lane_l, lane_r],
@@ -1672,5 +1720,84 @@ mod tests {
                 "event {t} not a segment boundary"
             );
         }
+    }
+    fn one_shot_global_lfo_held(m: &mut Mangle, io: &mut Scripted) {
+        m.lfo_curves[0] = Curve::ramp();
+        for _ in 0..2000 {
+            render_setup(m, io, 512, 512, &|m| {
+                let t = &m.params.table;
+                m.base.values[t.pos(mp::pid(Module::Lfo, 0, mp::LFO_ONESHOT_IDX))] = 1.0;
+            });
+            if m.gmod.last_lfo[0].0 > 0.95 {
+                return;
+            }
+        }
+        panic!("one-shot never reached its end");
+    }
+
+    #[test]
+    fn lfo_trig_param_restarts_global_one_shot() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        one_shot_global_lfo_held(&mut m, &mut io);
+        let set = |m: &mut Mangle| {
+            let t = &m.params.table;
+            m.base.values[t.pos(mp::pid(Module::Lfo, 0, mp::LFO_ONESHOT_IDX))] = 1.0;
+            m.base.values[t.pos(mp::pid(Module::Lfo, 0, LFO_TRIG_IDX))] = 1.0;
+        };
+        render_setup(&mut m, &mut io, 512, 512, &set);
+        assert!(m.gmod.last_lfo[0].0 < -0.5, "{}", m.gmod.last_lfo[0].0);
+        for _ in 0..400 {
+            render_setup(&mut m, &mut io, 512, 512, &set);
+        }
+        assert!(m.gmod.last_lfo[0].0 > 0.95, "held Trig must not re-fire");
+    }
+
+    #[test]
+    fn gui_trig_request_restarts_global_one_shot() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        one_shot_global_lfo_held(&mut m, &mut io);
+        m.params.lfo_trig_requests.store(1 << 3, Ordering::Release);
+        render_setup(&mut m, &mut io, 512, 512, &|m| {
+            let t = &m.params.table;
+            m.base.values[t.pos(mp::pid(Module::Lfo, 0, mp::LFO_ONESHOT_IDX))] = 1.0;
+        });
+        assert!(m.gmod.last_lfo[0].0 < -0.5, "{}", m.gmod.last_lfo[0].0);
+        assert_eq!(m.params.lfo_trig_requests.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn loop_lfo_advances_with_engine_gated_off() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        io.input.push_back(note_on());
+        let off = |m: &mut Mangle| {
+            let t = &m.params.table;
+            m.base.values[t.pos(mp::pid(Module::Grain, 1, 0))] = 0.0;
+        };
+        render_setup(&mut m, &mut io, 512, 512, &off);
+        let i = m.vm.voices.iter().position(|v| v.gate).unwrap();
+        let a = m.vm.voices[i].last_scan[1];
+        render_setup(&mut m, &mut io, 512, 512, &off);
+        let b = m.vm.voices[i].last_scan[1];
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn loop_lfo_trig_restarts_voice_loop_lfo() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        io.input.push_back(note_on());
+        render_setup(&mut m, &mut io, 512 * 8, 512, &|_| {});
+        let i = m.vm.voices.iter().position(|v| v.gate).unwrap();
+        let before = m.vm.voices[i].loop_lfos[0].running_phase;
+        render_setup(&mut m, &mut io, 512, 512, &|m| {
+            let t = &m.params.table;
+            m.base.values[t.pos(mp::pid(Module::LoopLfo, 0, LFO_TRIG_IDX))] = 1.0;
+        });
+        let after = m.vm.voices[i].loop_lfos[0].running_phase;
+        assert!(after < before, "{after} vs {before}");
+        assert!(after < 0.05, "{after}");
     }
 }

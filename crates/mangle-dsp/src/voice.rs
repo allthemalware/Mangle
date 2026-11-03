@@ -29,6 +29,8 @@ pub struct Voice {
     pub mod_offsets: Vec<(u32, f32)>,
     /// Last block's Loop LFO outputs — fed back as mod sources.
     pub last_scan: [(f32, f32); 3],
+    /// Previous Loop LFO Trig values, for rising-edge detection.
+    pub trig_prev: [bool; 3],
     /// True from note-on until the shell reports voice termination.
     pub was_sounding: bool,
     /// Allocation order stamp for oldest-steal.
@@ -60,6 +62,7 @@ impl Voice {
             ],
             mod_offsets: Vec::with_capacity(128),
             last_scan: [(0.0, 0.0); 3],
+            trig_prev: [false; 3],
             was_sounding: false,
             stamp: 0,
         }
@@ -166,6 +169,7 @@ impl VoiceManager {
         v.was_sounding = true;
         v.mod_offsets.clear();
         v.last_scan = [(0.0, 0.0); 3];
+        v.trig_prev = [false; 3];
         v.stamp = stamp;
         for lane in v.lanes.iter_mut() {
             // soft_reset (not reset) so a stolen, still-sounding voice's grains
