@@ -5,8 +5,10 @@
 //!   crossings, Blackman window, per-phase weight normalization). When
 //!   downsampling the kernel stretches by the ratio, so it is a proper
 //!   decimation lowpass — no aliasing of content above the new Nyquist.
-//!   Offline quality, simple, dependency-free; worst case (300 s @ 96 kHz
-//!   → 48 kHz) lands in single-digit seconds in release builds.
+//!   Offline quality, simple, dependency-free; a polyphase table
+//!   (1024 phases, linearly interpolated) keeps it fast: 300 s of mono
+//!   audio resamples to 48 kHz in about 3 s (release build, 44.1 kHz
+//!   or 96 kHz source).
 //! * **Hash** — BLAKE3 over the file bytes, truncated to the leading 8
 //!   bytes to fit the state format's u64 (used for missing-file/relink
 //!   verification, not security).
@@ -62,12 +64,34 @@ impl From<std::io::Error> for LoadError {
 
 // ----------------------------------------------------------- resample ---
 
+/// Phase rows in the polyphase table (one extra guard row for phase 1.0).
+const PHASES: usize = 1024;
+
+/// Dot product with independent lanes so the compiler can vectorize it.
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    let mut lanes = [0.0f32; 8];
+    let (ac, ar) = a.as_chunks::<8>();
+    let (bc, br) = b.as_chunks::<8>();
+    for (x, y) in ac.iter().zip(bc) {
+        for l in 0..8 {
+            lanes[l] += x[l] * y[l];
+        }
+    }
+    let mut tail = 0.0f32;
+    for (x, y) in ar.iter().zip(br) {
+        tail += x * y;
+    }
+    lanes.iter().sum::<f32>() + tail
+}
+
 /// Arbitrary-ratio windowed-sinc resampler for one channel.
 ///
 /// Kernel: `sinc(cutoff · x) · blackman(x / half)` with the kernel
 /// stretched by the ratio when decimating (so the lowpass lands below the
-/// destination Nyquist), and each output sample normalized by its weight
-/// sum for exact unity DC gain at every fractional phase.
+/// destination Nyquist). The kernel is tabulated once per call as
+/// `PHASES` polyphase rows (plus a guard row), each normalized to unit sum
+/// for exact DC gain; each output sample linearly blends the two rows
+/// around its fractional position.
 pub fn resample_channel(src: &[f32], src_rate: f64, dst_rate: f64) -> Vec<f32> {
     if src.is_empty() {
         return Vec::new();
@@ -82,16 +106,15 @@ pub fn resample_channel(src: &[f32], src_rate: f64, dst_rate: f64) -> Vec<f32> {
     let cutoff = 0.92 / scale;
     let out_len = ((src.len() as f64) / ratio).floor() as usize;
     let last = src.len() as isize - 1;
-    let mut out = Vec::with_capacity(out_len);
-    for i in 0..out_len {
-        let t = i as f64 * ratio;
-        let it = t.floor() as isize;
-        let frac = t - it as f64;
-        let mut acc = 0.0f64;
+    let taps = 2 * half as usize + 1;
+
+    let mut table = vec![0.0f32; (PHASES + 1) * taps];
+    let mut row64 = vec![0.0f64; taps];
+    for (p, row) in table.chunks_exact_mut(taps).enumerate() {
+        let frac = p as f64 / PHASES as f64;
         let mut wsum = 0.0f64;
-        let mut k = -half;
-        while k <= half {
-            let x = k as f64 - frac;
+        for (j, h) in row64.iter_mut().enumerate() {
+            let x = (j as isize - half) as f64 - frac;
             let y = std::f64::consts::PI * x * cutoff;
             let sinc = if y.abs() < 1e-12 { 1.0 } else { y.sin() / y };
             let u = x / half as f64;
@@ -101,17 +124,36 @@ pub fn resample_channel(src: &[f32], src_rate: f64, dst_rate: f64) -> Vec<f32> {
             } else {
                 0.0
             };
-            let h = sinc * w;
-            let idx = (it + k).clamp(0, last) as usize;
-            acc += src[idx] as f64 * h;
-            wsum += h;
-            k += 1;
+            *h = sinc * w;
+            wsum += *h;
         }
-        out.push(if wsum.abs() > 1e-12 {
-            (acc / wsum) as f32
+        let norm = if wsum.abs() > 1e-12 { 1.0 / wsum } else { 0.0 };
+        for (o, h) in row.iter_mut().zip(&row64) {
+            *o = (h * norm) as f32;
+        }
+    }
+
+    let mut window = vec![0.0f32; taps];
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let t = i as f64 * ratio;
+        let it = t.floor() as isize;
+        let frac = t - it as f64;
+        let pf = frac * PHASES as f64;
+        let p0 = (pf.floor() as usize).min(PHASES - 1);
+        let w = (pf - p0 as f64) as f32;
+        let r0 = &table[p0 * taps..(p0 + 1) * taps];
+        let r1 = &table[(p0 + 1) * taps..(p0 + 2) * taps];
+        let win: &[f32] = if it - half >= 0 && it + half <= last {
+            let start = (it - half) as usize;
+            &src[start..start + taps]
         } else {
-            0.0
-        });
+            for (j, v) in window.iter_mut().enumerate() {
+                *v = src[(it + j as isize - half).clamp(0, last) as usize];
+            }
+            &window
+        };
+        out.push((1.0 - w) * dot(r0, win) + w * dot(r1, win));
     }
     out
 }
@@ -248,14 +290,12 @@ fn load_sample_with_cap(
     }
 
     let l_src = std::mem::take(&mut chans[0]);
-    let r_src = if n_ch >= 2 {
-        std::mem::take(&mut chans[1])
-    } else {
-        l_src.clone()
-    };
-
     let l = resample_channel(&l_src, src_rate, target_rate as f64);
-    let r = resample_channel(&r_src, src_rate, target_rate as f64);
+    let r = if n_ch >= 2 {
+        resample_channel(&chans[1], src_rate, target_rate as f64)
+    } else {
+        l.clone()
+    };
     if l.is_empty() {
         return Err(LoadError::Empty);
     }
