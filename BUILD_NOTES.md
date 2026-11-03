@@ -1,20 +1,17 @@
-# Mangle — build notes (read before first `cargo build`)
+# Mangle — build notes
 
-The `mangle-dsp` and `mangle-loader` crates are compiled and unit-tested
-(`cargo test -p mangle-dsp` → 94 pass; the loader's 10 pass). The `mangle`
-plugin crate **compiles and loads** against egui 0.31.1 / current nih-plug.
-The notes below are retained as a reference for the API-drift points that
-were resolved.
+The `mangle-dsp`, `mangle-loader`, and `mangle` plugin crates compile cleanly
+against egui 0.31.1 and current nih-plug, and are validated by the workspace
+test suite (`cargo test --workspace`) and the headless CLAP smoketest
+(`bash tools/run-smoketest.sh --release`). The API-drift notes below are
+retained as a **historical** reference for the nih-plug / egui integration
+points that were resolved during initial bring-up.
 
-**Not yet host-audited:** the selectable engine modes, the Spectral phase
-vocoder, and sample-accurate event timing landed after the original alpha
-test — they pass the unit tests but have not been played through a live host. Audition them in Bitwig (listen for
-artifacts, watch CPU at polyphony, confirm `assert_process_allocs` never trips)
-before relying on them.
-
-Expect the first `cargo build` to surface real signature mismatches. This
-file is the map. None of these are logic bugs — they're API-drift fixes
-against whatever revision of nih-plug / egui your checkout pins.
+**Live-host audition notes:** the selectable engine modes, the Spectral phase
+vocoder, and sample-accurate event timing pass the workspace unit tests, the
+scripted-event `render_block` harness, and the headless CLAP smoketest. When
+auditioning in a DAW such as Bitwig, listen for artifacts, watch CPU at
+polyphony, and confirm `assert_process_allocs` never trips.
 
 ## How to build
 
@@ -22,16 +19,11 @@ against whatever revision of nih-plug / egui your checkout pins.
 cargo xtask bundle mangle --release      # -> target/bundled/mangle.clap
 ```
 
-rust-analyzer will surface every issue below in seconds; fix, repeat. The
-DSP core compiling cleanly means the hard correctness work is already
-validated — this is plumbing.
+## Historical API-drift reference (resolved), by file
 
-## Likely friction points, by file
-
-### `crates/mangle/src/editor.rs` (highest risk)
+### `crates/mangle/src/editor.rs`
 All egui paint calls funnel through three helpers near the top — `fill`,
-`frame`, `txt` — precisely so version drift is fixed in *one* place. Check
-these first:
+`frame`, `txt` — precisely so version drift is fixed in *one* place:
 
 - **`rect_stroke`** — RESOLVED: egui 0.31 takes a `StrokeKind` argument
   (`rect_stroke(rect, 0.0, stroke, StrokeKind::Inside)`). Done in
@@ -69,35 +61,35 @@ these first:
   `visuals.panel_fill`, `visuals.override_text_color` are current names;
   adjust if your egui renamed them.
 
-### `crates/mangle/src/lib.rs` (shell)
+### `crates/mangle/src/lib.rs` (shell — resolved)
 - **`unsafe impl Params`** — the manual `param_map()` returns
-  `Vec<(String, ParamPtr, String)>`. Confirm the tuple shape and that
-  `ParamPtr` / `.as_ptr()` still match; this is the one place we bypass
-  the `#[derive(Params)]` macro to generate 380 params from the table.
-- **`with_poly_modulation_id` / `PolyModulationConfig`** — poly-mod opt-in.
-  Confirm the const name `CLAP_POLY_MODULATION_CONFIG`.
+  `Vec<(String, ParamPtr, String)>` with string IDs formatted as `p{:06x}`
+  (e.g. `p020104`), bypassing the `#[derive(Params)]` macro to generate 396
+  params from the table (`table_has_396_params`).
+- **`with_poly_modulation_id` / `PolyModulationConfig`** — poly-mod opt-in via
+  `CLAP_POLY_MODULATION_CONFIG` (`voice-info` reports the fixed 16-voice
+  capacity).
 - **`NoteEvent` arms** — `PolyModulation`, `MonoAutomation`, `PolyTuning`,
-  `PolyPressure`, `MidiChannelPressure`, `Choke`, `VoiceTerminated`. Field
-  names (`poly_modulation_id`, `normalized_offset`, `tuning`, `pressure`)
-  are from memory; the compiler will name any that moved.
+  `PolyPressure`, `PolyVolume`, `PolyPan`, `MidiChannelPressure`,
+  `MidiPitchBend`, `Choke`, `VoiceTerminated`.
 - **`context.transport()`** — `.tempo`, `.playing`, `.pos_seconds()`.
-  Confirm `pos_seconds()` exists (vs `pos_samples()` + manual divide).
 - **`serialize_fields` / `deserialize_fields`** — `BTreeMap<String,String>`
-  persistence hooks on the `Params` trait. Confirm the signatures.
-- **`AsyncExecutor<Self>`** in the `editor()` hook signature — the generic
-  may differ by version.
+  persistence hooks on the `Params` trait (`mangle_state` hex blob + optional
+  `mangle_embed_<slot>` base64 sample bytes).
+- **`AsyncExecutor<Self>`** in the `editor()` hook signature.
 
 ### What is NOT in question
 - All of `mangle-dsp` (params table, grain engine, mod matrix, resolver,
-  curves, drift/noise, squeeze, state codec, randomizer + locks).
-- All of `mangle-loader` (decode, resample, hash, multi-drop).
+  curves, drift/noise, filter, squeeze, state codec, randomizer + locks/pools).
+- All of `mangle-loader` (decode, resample, hash, base64, multi-drop).
 - The data contract between them and the shell (the `Patch` /
   `ParamTable` / `ExtraState` types are shared and compile).
 
-## First-run sanity (once it builds)
-1. Load in Bitwig; confirm 380 params appear in the generic editor.
+## First-run sanity
+1. Load in Bitwig; confirm 396 params appear in the generic editor.
 2. Hold a note — you should hear the built-in fallback tone (no sample
-   loaded). If silent, check the `process()` output split and `g.level`.
+   loaded). With Global On and Key at 0 % and no note held, the dedicated drone
+   voice plays automatically.
 3. Launch with `MANGLE_SAMPLE=/path/to/a.wav` — slot 1 should show a
    waveform and play your sample with key tracking.
 4. Open the GUI; drag a grain cell, toggle a GATE, drag a loop edge, hit
@@ -105,20 +97,23 @@ these first:
 5. Verify `assert_process_allocs` doesn't trip (it's the canary for any
    audio-thread allocation regressions).
 
-## Headless smoketest (no DAW needed)
+## Headless smoketest & CI (no DAW needed)
 
-`bash tools/run-smoketest.sh` bundles `mangle.clap` and drives it through a
-minimal in-process CLAP host (`tools/smoketest.cpp`, CLAP headers vendored under
-`tools/clap/`). It covers the shell layer the `mangle-dsp` unit tests can't:
-factory/descriptor, the full 384-param table + `value_to_text`, note ports,
-note-on/off, note-expression Volume/Pan, the master filter (LP cut + a
-matrix→filter route), the `Loop Start = Loop End = 100%` clamp regression (would
-crash the audio thread pre-fix), state save/mutate/load roundtrip, and a
-null-transport pass. Wire it into CI next to `cargo test`.
+`bash tools/run-smoketest.sh --release` bundles `mangle.clap` and drives it
+through a minimal in-process CLAP host (`tools/smoketest.cpp`, CLAP headers
+vendored under `tools/clap/`). It covers the shell layer that `mangle-dsp` unit
+tests alone don't: factory/descriptor, the full 396-param table +
+`value_to_text`, note ports, note-on/off, note-expression Volume/Pan, the
+master filter (LP cut + a matrix→filter route), the `Loop Start = Loop End =
+100%` clamp regression (would crash the audio thread pre-fix), state
+save/mutate/load roundtrip, and a null-transport pass. It runs in CI
+(`.github/workflows/ci.yml`) alongside `cargo fmt --all --check`,
+`cargo clippy --all-targets -- -D warnings`, and the workspace unit tests.
 
-The **editor** has its own headless render test (`cargo test -p mangle`,
-`editor::gui_tests`): a bare `egui::Context` + stub `GuiContext` drive
-`draw_editor` across every screen (main, curves, each matrix page, each slot)
-while injecting clicks, drags, scrolls and out-of-bounds input, asserting no
-panic, finite geometry (no NaN rects), and balanced begin/end param gestures.
-No DAW or window required.
+The **shell** also has an in-crate scripted-event render harness
+(`render_block` tests in `crates/mangle/src/lib.rs`), and the **editor** has
+its own headless render tests (`cargo test -p mangle`, `editor::gui_tests`): a
+bare `egui::Context` + stub `GuiContext` drive `draw_editor` across every
+screen (main, curves, each matrix page, each slot) while injecting clicks,
+drags, scrolls and out-of-bounds input, asserting no panic, finite geometry (no
+NaN rects), and balanced begin/end param gestures. No DAW or window required.

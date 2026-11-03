@@ -24,10 +24,11 @@ absorbed by the mod matrix, Macros, and CLAP host facilities.
 exponential/log taper, `enum` = stepped list.
 
 **Snapshot rule (Torsion semantics, load-bearing).** Every parameter in the
-Grain group is sampled exactly once at grain creation. A live grain is never
-affected by later changes. Non-grain continuous params smooth over ~5 ms.
-Noise sources are re-rolled per grain; this is what makes Noise the
-"per-grain variation" source.
+Grain group is sampled exactly once at grain creation from the current
+~64-sample control tick's modulation values. A live grain is never affected by
+later changes. Non-grain continuous params smooth over ~5 ms. Noise sources are
+control-rate sample-and-hold, re-rolled on a fixed 750 Hz clock independent of
+host block size and note events (not per grain).
 
 **Modulation formula.** For each destination, in normalized units:
 
@@ -54,7 +55,7 @@ where `src` ∈ -1..+1, `scale` is the value of the row's Scale source
 | Stereo  | 0–200 %      | 100 %   | lin  | A M   | Output width. 0 % mono-sum, >100 % widened with partial inversion. |
 | Squeeze | off / on     | on      | bool | A S   | Gain leveler: upward compressor → downward comp/limiter. (Front panel said DYN; manual name wins.) |
 | Level   | -60–+6 dB    | 0 dB    | exp  | A M   | Master output volume. |
-| Voices  | 1–16         | 8       | int  | S     | **[new]** Max polyphony. 1 = mono/drone mode. |
+| Voices  | 1–16         | 8       | int  | S     | **[new]** Max polyphony (stepped-only, not host-automatable). 1 = mono mode; see §10 for drone mode. |
 
 ## 2. Macros 1–8  **[new]**
 
@@ -176,16 +177,17 @@ when Gate Sync is on.
 | Phase      | 0–360°        | 0°       | lin  | A M PN  | Also the reset/trig landing phase. |
 | St.Phase   | 0–100 %       | 0 %      | lin  | A M     | Phase offset between the L and R modulation channels. |
 | Lag        | 0–100 %       | 0 %      | lin  | A M     | Slew limiter on the output. |
-| Trig       | momentary     | —        | bool | A PN S  | Edge-triggered reset to Phase. Fired by note-on when the engine's Gate Sync is on. |
-| One-Shot   | off / on      | off      | bool | A S     | **[new]** Run the curve once and hold its final value instead of looping — the curve becomes a drawable MSEG envelope. Retrigger (Trig / Gate Sync) re-fires it. |
+| Trig       | momentary     | —        | bool | A PN S  | Edge-triggered reset to Phase (rising edge of the host param, per-note on Loop LFOs, or momentary TRIG button in the editor). Also fired by note-on when the engine's Gate Sync is on. |
+| One-Shot   | off / on      | off      | bool | A S     | **[new]** Reads the curve from Phase to its end and holds the final drawn point instead of looping — the curve becomes a drawable MSEG envelope. Free-running one-shots hold until retriggered (Trig / Gate Sync); transport-locked one-shots re-fire each transport cycle. |
 
 ## 5. LFOs ×6 (global)
 
 Identical parameter block to §4 with two differences: **Rate default is
 1.00 Hz**, and the six LFOs are global — a single instance each, shared by
-all voices (this preserves the "whole texture breathing together" character
-and keeps CPU sane). Torsion's 1000 fixed waveforms are replaced by the
-drawable curve + visual preset bank.
+all voices, so Rate, Phase, and Trig do not carry `PN` (not per-note
+modulatable; Loop LFO ones are). This preserves the "whole texture breathing
+together" character and keeps CPU sane. Torsion's 1000 fixed waveforms are
+replaced by the drawable curve + visual preset bank.
 
 ## 6. Drift ×3 / Noise ×3
 
@@ -195,38 +197,44 @@ drawable curve + visual preset bank.
 | Noise n St.Phase | 0–100 % | 0 %     | lin | A M   | Same crossfade for the noise pair. |
 
 Drift = spring-mass physical model with random accelerations (very slow,
-organic motion); internal rate fixed, as in Torsion. Noise = uniform random
--1..+1 with no smoothing, re-rolled at every grain snapshot — the per-grain
-variation source.
+organic motion); internal rate fixed, as in Torsion. Noise = control-rate
+sample-and-hold uniform random -1..+1 with no smoothing, re-rolled on a fixed
+750 Hz clock independent of host block size and note events.
 
 ## 7. Sample slots ×6
 
 | Param      | Range               | Default | Map | Flags | Notes |
 |------------|---------------------|---------|-----|-------|-------|
-| Root Note  | C-2–G8 (MIDI 0–127) | C3 (60) | int | S     | Reference pitch for Key tracking. |
-| Loop Start | 0–100 %             | 0 %     | lin | A     | Set by click-drag on the waveform: drag ←→ moves the window, ↑↓ grows/shrinks it (Torsion gestures). |
-| Loop End   | 0–100 %             | 100 %   | lin | A     | `start < end` enforced; window length capped at 100 s. |
+| Root Note  | C-2–G8 (MIDI 0–127) | C3 (60) | int | S     | Reference pitch for Key tracking (not host-automatable). |
+| Loop Start | 0–100 %             | 0 %     | lin | A     | Set by click-drag on the waveform: drag ←→ moves the region, ↑↓ resizes it about its centre, or drag either edge (Torsion gestures); double-click resets. |
+| Loop End   | 0–100 %             | 100 %   | lin | A     | `start < end` enforced; loop window length capped at 100 s. |
 | Gain       | -12–+12 dB          | 0 dB    | lin | A M   | **[new]** Per-slot trim for level-matching sources. |
 
 **Constraints & handling.** Max 300 s per slot; working loop window max 100 s
 (your spec). Import: drag-and-drop from the host DAW or a file manager, plus a
 file dialog; a multi-file drop fills slots from the selected one onward
-(Torsion behavior — select slot 1 first to fill all six). Decode via
+(Torsion behavior — select slot 1 first to fill all six). Loads run on a
+background thread with per-slot status (`loading`, `missing — LOAD to relink`,
+`failed`) and a message log; reloading a preset while running never stalls
+audio and clears slots the preset does not reference. Decode via
 `symphonia` (wav/flac/aiff/ogg/vorbis/mp3/adpcm) to f32, resampled to the
 host rate by a built-in arbitrary-ratio windowed sinc (kernel stretched
 when decimating, so no aliasing on downsampling). Memory honesty: 300 s stereo f32 @ 48 kHz ≈ 115 MB per slot,
-~690 MB absolute worst case — fine on a modern machine but worth a note in
-the README; mmap/lazy paging is a possible v2.
+~690 MB absolute worst case — fine on a modern machine.
 
-**State strategy.** Plugin state stores file path + BLAKE3 content hash +
-root/loop metadata; samples are *referenced* by default with a relink dialog
-for missing files, plus a per-preset **Embed samples** toggle that packs
-FLAC-compressed audio into the state blob for portable patches. Shift-drag
-zoom view (per slot) is saved as cosmetic state, never a param.
+**State strategy.** Plugin state stores file path + BLAKE3 content hash;
+samples are *referenced* by default (if a file is missing, the slot status
+shows `missing — LOAD to relink`), plus a per-preset **EMBED** toggle (**Embed
+samples**) that stores each referenced file's original bytes (base64) in the
+plugin state — bit-exact, so compressed formats stay compressed (not FLAC
+re-encoding) — and uses them automatically when the file is missing or changed.
+Shift-drag / Shift-wheel zoom view (per slot; double-click resets) is saved in
+state (v2), never a host param.
 
 ## 8. Mod matrix — 32 slots
 
-Per slot (all six columns are host params; amounts carry M for host
+Rows are named `"Mod 01"`–`"Mod 32"` in the host parameter list (IDs
+unchanged). Per slot (all six columns are host params; amounts carry M for host
 modulation of modulation depth):
 
 | Column | Range / values        | Default | Flags |
@@ -257,14 +265,18 @@ start offset inside it. Both kept, per the manual's destination table.
 **Scale semantics** (Torsion): the row's contribution is multiplied by the
 instantaneous value of the Scale source; None = ×1.
 
-**Evaluation.** Continuous destinations update on a 64-sample control tick;
-grain-snapshot destinations read instantaneous values (including a fresh
-Noise roll) at emission time. Rows whose source or destination is voice-local
-evaluate per voice; purely global rows evaluate once per tick.
+**Evaluation.** Continuous destinations update on a ~64-sample control tick;
+grain-snapshot destinations read the current ~64-sample control tick's
+modulation values at grain emission time (Noise is clocked at 750 Hz). Rows
+whose destination is voice-local evaluate per voice; global-scope destinations
+(LFO 1–6 params, `Flt Cutoff`, `Flt Reso`) evaluate once per tick and see
+Macros at their host value and voice-local sources (Velocity, Note, Note Oct,
+Note Gate, Pressure, Voice Random, Loop LFO 1–3) from the most recently started
+held voice (zero when none is held).
 
 **UI.** 8 rows per page × 4 pages. Ctrl-click a cell to clear/zero it
-(Torsion gesture). Right-click a destination cell offers "pick by dragging a
-control" — the drag-to-assign flow from the manual.
+(Torsion gesture). Right-click Source, Scale, or Dest to open grouped menus;
+Dest menus also offer **PICK FROM CONTROL** (touch a control to assign it).
 
 ## 8b. Master filter (Fx)  **[new]**
 
@@ -278,25 +290,25 @@ never changes the sound of an existing patch until switched on.
 | On     | off / on       | off     | bool | A S   | Master gate for the filter. Off = fully bypassed (states cleared). |
 | Type   | LP/BP/HP/Notch | LP      | step | A S   | Response. Step index is append-only. |
 | Cutoff | 0–20 kHz       | 20 kHz  | cube | A M   | Corner frequency (cube taper). Clamped to `[20 Hz, 0.47·SR]`. Smoothed (~5 ms) and coefficients refreshed each ~64-sample control chunk. |
-| Reso   | 0–100 %        | 0 %     | lin  | A M   | Resonance; maps to `k = 2 − 1.96·reso`, kept short of self-oscillation. |
+| Reso   | 0–100 %        | 0 %     | lin  | A M   | Resonance; maps to `k = 2 − 1.96·reso`, kept short of self-oscillation. Smoothed (~5 ms) across control chunks. |
 
 Cutoff and Reso are `M`-flagged and are **mod-matrix destinations** (`Flt Cutoff`,
 `Flt Reso` — the two entries appended to the dest enum, DEST_COUNT 79 → 81). They
 are evaluated **per channel** in the output chain, so an LFO with St.Phase 50 % on
-Cutoff sweeps L and R divergently — the stereo split/invert/merge move. (Because
-the filter sits after the width stage, this is a per-block target, smoothed across
-control chunks.)
+Cutoff sweeps L and R divergently — the stereo split/invert/merge move. Modulation
+targets follow the ~64-sample control chunk (block-size invariant), with both
+cutoff and resonance smoothed over ~5 ms.
 
 ## 9. Curves (EDIT.CURVES screen)
 
 Nine curve objects: Loop 1–3, LFO 1–6. Each is `f32[256]` in -1..+1, linear
-interpolation with optional smoothing pass on edit. The EDIT.CURVES button
-swaps the main view for a 3×3 grid of editors. Editing: freehand draw, line
-tool, step quantize (2–64), smooth, invert, mirror, phase shift; plus a
-preset bank of ~64 shapes rendered as thumbnails only, no names (your spec) —
-sine/tri/saw/square families, steps, random walks, chaos maps, gate patterns.
-Curves live in plugin state, not host params; hosts automate Rate/Phase
-instead.
+interpolation with optional smoothing pass on edit. The `CURVES` tab opens a
+tabbed single-curve editor (selecting Loop 1–3 or LFO 1–6, not a 3×3 grid).
+Editing: `DRAW` (freehand) and `LINE` tools, step quantize (2–64), phase shift,
+smooth, invert, mirror; plus a 64-shape thumbnail preset bank (rendered as
+thumbnails only, no names — sine/tri/saw/square families, steps, random walks,
+chaos maps, gate patterns). Curves live in plugin state, not host params; hosts
+automate Rate/Phase instead.
 
 ## 10. Voice architecture & CLAP integration
 
@@ -305,27 +317,37 @@ sources (Velocity, Note, Note Oct, Note Gate, Pressure, Voice Random), and
 any per-note param offsets the host sends. **Global:** LFO 1–6, Drift, Noise,
 Env Follower, Macro base values, all base parameter values.
 
-**Lifecycle.** Note-on allocates a voice (steal oldest-then-quietest beyond
-Voices). Note-off stops emission; sounding grains ring out naturally (tail ≤
-the longest live grain), then `CLAP_EVENT_NOTE_END` is sent so the host can
-recycle the note ID. With Key at 0 % and engine Gates on, Mangle free-runs as
-a Torsion-style drone box — notes optional.
+**Lifecycle & drone mode.** Note-on allocates a voice from the 16-voice pool
+(steal oldest-then-quietest beyond Voices); note matching respects MIDI
+channel. Note-off stops emission; sounding grains (or a Spectral overlap-add
+tail) ring out naturally, then `CLAP_EVENT_NOTE_END` is sent so the host can
+recycle the note ID. `NOTE_END` is also reported for stolen voices and after
+RND / panic. **Drone mode:** with Global On and Key at 0 % and no held note, a
+dedicated drone voice (outside the 16-voice pool) plays; playing a note takes
+over, and releasing returns to the drone.
 
 **Extensions:** `audio-ports` (1 stereo out) · `note-ports` (CLAP dialect,
 MIDI fallback) · `params` · `state` · `gui` (X11 first, then Win32, Cocoa
-last) · `voice-info` (reports Voices) · `timer-support` · `latency` (0 —
-Squeeze must stay zero-lookahead or report honestly) · `render`.
+last) · `voice-info` (reports the fixed capacity of 16, not the Voices param) ·
+`timer-support` · `latency` (0 — Squeeze and primed Spectral stay
+zero-lookahead) · `render`. Voices and per-slot Root Note are not
+host-automatable (`S` only); Grain Gate is per-note modulatable (`A M PN S`).
 
-**Note expressions:** tuning → adds into the engine Pitch path (post-Key) ·
-volume → voice gain · pan → voice output pan · pressure → Pressure source.
+**Note expressions & MIDI:** tuning → adds into the engine Pitch path
+(post-Key) · MIDI pitch bend → ±2 semitones per channel · volume → voice output
+gain · pan → voice output pan · pressure (CLAP per-note pressure and MIDI
+channel pressure) → Pressure source.
 
-**Threading.** Audio thread is allocation- and lock-free. Sample loads and
-curve edits happen on the main thread and are handed to audio via arc-swap /
-triple buffer.
+**Threading.** Audio thread is allocation- and lock-free. Sample loads run on a
+background thread and are handed to audio via a non-blocking pending queue
+(with old buffers returned to the GUI thread for drop); curve and state edits
+sync via a generation counter.
 
 ## 11. Parameter IDs & count
 
-Stable `u32`: `id = (module << 16) | (instance << 8) | index`
+Stable `u32`: `id = (module << 16) | (instance << 8) | index`. Hosts see
+nih-plug's hash of the string id `p%06x` (the documented `u32` in hex, formatted
+as `p{:06x}` in Rust), e.g. `p020104`; that string format must never change.
 
 | Module | Code | Instances | Params each |
 |--------|------|-----------|-------------|
@@ -364,7 +386,14 @@ RANDOM mutates from.
 5. Mod matrix + sources (LFO/curve engine, drift, noise, env follower).
 6. GUI per the locked mockup; waveform view with loop gestures + grain
    overlay modes (per-engine / per-channel / per-sample).
-7. EDIT.CURVES screen.
-8. RANDOM generator + pools + TOOLS menu (reset, copy grain).
+7. EDIT.CURVES screen (tabbed single-curve editor).
+8. RANDOM generator + Amount/Complexity + pool editor (grain params, LFO
+   params, sources, scales, destinations — saved with the preset; Mode, Level,
+   Pitch, and Quant are out of the default grain pool; RND keeps notes playing)
+   + TOOLS menu (init, copy grain, `UNDO RND`, `REROLL LAST SEED` for exact
+   recall of the last roll in the session).
 9. Squeeze leveler; final gain staging.
-10. Preset format (+ embed-samples) and factory bank.
+10. Preset state format v2 (appends instance seed for per-instance randomness
+    reproducible per project, RANDOM pools, per-slot waveform views, and the
+    base64 embed-samples flag; v1 presets load). Deferred / deviation: the
+    factory preset bank is not built.
