@@ -4,6 +4,8 @@
 use crate::rng::Rng;
 
 pub const CURVE_LEN: usize = 256;
+/// Number of shapes in the preset bank.
+pub const N_PRESETS: usize = 64;
 
 /// A drawable modulation curve: 256 samples in -1..1, linearly interpolated,
 /// wrapping. Edited on the EDIT.CURVES screen; stored in plugin state.
@@ -57,6 +59,136 @@ impl Curve {
         for (i, d) in data.iter_mut().enumerate() {
             let t = i as f32 / (CURVE_LEN - 1) as f32;
             *d = (*d - end * t * 0.5).clamp(-1.0, 1.0);
+        }
+        Curve(data)
+    }
+
+    /// Straight segment between table points `i0` and `i1` (either order),
+    /// inclusive. Indices clamp to the table; values clamp to -1..1.
+    pub fn line(&mut self, i0: usize, v0: f32, i1: usize, v1: f32) {
+        let (i0, v0, i1, v1) = if i0 <= i1 {
+            (i0, v0, i1, v1)
+        } else {
+            (i1, v1, i0, v0)
+        };
+        let (i0, i1) = (i0.min(CURVE_LEN - 1), i1.min(CURVE_LEN - 1));
+        let (v0, v1) = (v0.clamp(-1.0, 1.0), v1.clamp(-1.0, 1.0));
+        if i0 == i1 {
+            self.0[i0] = v1;
+            return;
+        }
+        let span = (i1 - i0) as f32;
+        for i in i0..=i1 {
+            let t = (i - i0) as f32 / span;
+            self.0[i] = (v0 + (v1 - v0) * t).clamp(-1.0, 1.0);
+        }
+        self.0[i0] = v0;
+        self.0[i1] = v1;
+    }
+
+    /// Step-quantize: split the table into `steps` (clamped 2..=64) equal
+    /// regions, each set to its region's mean.
+    pub fn quantize(&mut self, steps: usize) {
+        let steps = steps.clamp(2, 64);
+        for k in 0..steps {
+            let lo = k * CURVE_LEN / steps;
+            let hi = (k + 1) * CURVE_LEN / steps;
+            let mean = self.0[lo..hi].iter().sum::<f32>() / (hi - lo) as f32;
+            self.0[lo..hi].fill(mean.clamp(-1.0, 1.0));
+        }
+    }
+
+    /// Rotate by `cycles` of a cycle (positive = later), linear-interpolated.
+    pub fn shift_phase(&mut self, cycles: f32) {
+        let src = self.clone();
+        for (i, v) in self.0.iter_mut().enumerate() {
+            *v = src.sample(i as f32 / CURVE_LEN as f32 - cycles);
+        }
+    }
+
+    /// Preset bank entry `i` (wraps modulo `N_PRESETS`): basic waves, pulse
+    /// widths, stepped shapes, random walks, chaos maps, gate patterns and
+    /// exp/log/S ramps.
+    pub fn preset(i: usize) -> Curve {
+        use core::f32::consts::{PI, TAU};
+        let i = i % N_PRESETS;
+        let k = i % 8;
+        match i / 8 {
+            0 => match k {
+                0 => Self::sine(),
+                1 => Self::triangle(),
+                2 => Self::from_fn(|t| t * 2.0 - 1.0),
+                3 => Self::from_fn(|t| 1.0 - t * 2.0),
+                4 => Self::from_fn(|t| (t * TAU).sin().abs() * 2.0 - 1.0),
+                5 => Self::from_fn(|t| (t * TAU).sin().max(0.0) * 2.0 - 1.0),
+                6 => Self::from_fn(|t| (t * 2.0 * TAU).sin()),
+                _ => Self::from_fn(|t| (t * 3.0 * TAU).sin()),
+            },
+            1 => {
+                let width = (k + 1) as f32 / 9.0;
+                Self::from_fn(|t| if t < width { 1.0 } else { -1.0 })
+            }
+            2 => {
+                const N: [usize; 8] = [2, 3, 4, 5, 6, 8, 12, 16];
+                Self::steps(N[k], 0x5712 + k as u64)
+            }
+            3 => Self::random_walk(0x3a1c + k as u64),
+            4 => {
+                let r = 3.6 + 0.055 * k as f32;
+                Self::chaos(0.1 + 0.1 * k as f32, |x| r * x * (1.0 - x))
+            }
+            5 => {
+                let mu = 1.2 + 0.1 * k as f32;
+                Self::chaos(0.2 + 0.07 * k as f32, |x| mu * x.min(1.0 - x) + 0.01)
+            }
+            6 => {
+                const PATTERNS: [u16; 8] = [
+                    0b1000_1000_1000_1000,
+                    0b1010_1010_1010_1010,
+                    0b1001_0010_0100_1001,
+                    0b1110_1110_1110_1110,
+                    0b1011_0110,
+                    0b1000_0100,
+                    0b1101_0010,
+                    0b1100_1010_1100_0110,
+                ];
+                let p = PATTERNS[k];
+                let n = if k < 4 || k == 7 { 16 } else { 8 };
+                Self::from_fn(|t| {
+                    let step = ((t * n as f32) as usize).min(n - 1);
+                    if p >> (n - 1 - step) & 1 == 1 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                })
+            }
+            _ => match k {
+                0 => Self::from_fn(|t| (t * 4.0).exp_m1() / 4f32.exp_m1() * 2.0 - 1.0),
+                1 => Self::from_fn(|t| (-t * 4.0).exp_m1() / (-4f32).exp_m1() * -2.0 + 1.0),
+                2 => Self::from_fn(|t| (1.0 + t * 15.0).ln() / 16f32.ln() * 2.0 - 1.0),
+                3 => Self::from_fn(|t| 1.0 - (1.0 + t * 15.0).ln() / 16f32.ln() * 2.0),
+                4 => Self::from_fn(|t| -(t * PI).cos()),
+                5 => Self::from_fn(|t| (t * PI).cos()),
+                6 => Self::from_fn(|t| (t * 8.0).exp_m1() / 8f32.exp_m1() * 2.0 - 1.0),
+                _ => Self::from_fn(|t| {
+                    let s = t * t * (3.0 - 2.0 * t);
+                    s * s * (3.0 - 2.0 * s) * 2.0 - 1.0
+                }),
+            },
+        }
+    }
+
+    /// Iterated 1-D map rendered as a bipolar curve.
+    fn chaos(x0: f32, f: impl Fn(f32) -> f32) -> Self {
+        let mut x = x0;
+        for _ in 0..16 {
+            x = f(x).clamp(0.0, 1.0);
+        }
+        let mut data = [0.0; CURVE_LEN];
+        for d in data.iter_mut() {
+            x = f(x).clamp(0.0, 1.0);
+            *d = x * 2.0 - 1.0;
         }
         Curve(data)
     }
@@ -362,6 +494,62 @@ mod tests {
             "wrapping LFO should not be held at the end: {}",
             wout.0
         );
+    }
+
+    #[test]
+    fn line_endpoints_exact_and_linear() {
+        let mut c = Curve::sine();
+        c.line(40, -0.5, 10, 0.7); // reversed order
+        assert_eq!(c.0[10], 0.7);
+        assert_eq!(c.0[40], -0.5);
+        for i in 10..=40 {
+            let want = 0.7 + (-0.5 - 0.7) * (i - 10) as f32 / 30.0;
+            assert!((c.0[i] - want).abs() < 1e-5);
+        }
+        c.line(0, 5.0, 255, -5.0);
+        assert_eq!((c.0[0], c.0[255]), (1.0, -1.0));
+    }
+
+    #[test]
+    fn quantize_gives_flat_regions_at_means() {
+        let mut c = Curve::ramp();
+        let src = c.clone();
+        c.quantize(4);
+        for k in 0..4 {
+            let r = k * 64..(k + 1) * 64;
+            let mean = src.0[r.clone()].iter().sum::<f32>() / 64.0;
+            for i in r {
+                assert!((c.0[i] - mean).abs() < 1e-6);
+            }
+        }
+        assert_ne!(c.0[63], c.0[64]);
+    }
+
+    #[test]
+    fn shift_phase_round_trips() {
+        let src = Curve::random_walk(5);
+        let mut c = src.clone();
+        c.shift_phase(0.25);
+        assert!((c.0[64] - src.0[0]).abs() < 1e-3);
+        c.shift_phase(-0.25);
+        for i in 0..CURVE_LEN {
+            assert!((c.0[i] - src.0[i]).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn presets_in_range_deterministic_and_distinct() {
+        let all: Vec<Curve> = (0..N_PRESETS).map(Curve::preset).collect();
+        for (i, c) in all.iter().enumerate() {
+            assert!(c.0.iter().all(|v| (-1.0..=1.0).contains(v)), "preset {i}");
+            assert_eq!(c.0, Curve::preset(i).0);
+        }
+        assert_eq!(Curve::preset(N_PRESETS + 3).0, all[3].0);
+        for a in 0..N_PRESETS {
+            for b in a + 1..N_PRESETS {
+                assert_ne!(all[a].0, all[b].0, "presets {a} and {b} identical");
+            }
+        }
     }
 
     #[test]

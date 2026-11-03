@@ -27,7 +27,7 @@ use nih_plug_egui::{create_egui_editor, egui};
 
 use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 
-use mangle_dsp::curve::Curve;
+use mangle_dsp::curve::{Curve, N_PRESETS};
 use mangle_dsp::engine::GrainMode;
 use mangle_dsp::params::{pid, Module, Patch, GRAIN_MODE_IDX, N_GRAIN_MODES};
 use mangle_dsp::random::{randomize, RandomOptions};
@@ -488,6 +488,14 @@ enum LoopDrag {
     Move(f32), // grab offset from loop start, in normalized units
 }
 
+/// Pointer tool on the curve canvas.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum CurveTool {
+    #[default]
+    Draw,
+    Line,
+}
+
 /// Body pages under the persistent header/waveform/lanes area.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Tab {
@@ -540,6 +548,16 @@ struct UiState {
     selected_curve: usize,
     loop_drag: Option<LoopDrag>,
     last_draw: Option<(usize, f32)>,
+    curve_tool: CurveTool,
+    /// LINE tool: table point and value where the press started.
+    line_start: Option<(usize, f32)>,
+    /// QUANT step count (2..=64); 0 until first shown, then 8.
+    quant: usize,
+    /// Preset-bank thumbnails, built once on first use.
+    presets: Vec<Curve>,
+    /// Last-frame screen rects of the curve canvas and the preset thumbnails.
+    curve_rect: Option<Rect>,
+    thumb_rects: Vec<Rect>,
     /// Transient status line (drop results, etc.).
     status: String,
     /// Slot a hovered file-drop would land in (for highlight).
@@ -1581,52 +1599,103 @@ fn curves_screen(
         }
     }
 
-    // Freehand drawing with gap interpolation.
-    if resp.dragged() || resp.clicked() {
-        if let Some(p) = resp.interact_pointer_pos() {
-            let half = rect.height() * 0.48;
-            let idx = (((p.x - rect.left()) / rect.width()) * 255.0).clamp(0.0, 255.0) as usize;
-            let val = ((mid - p.y) / half).clamp(-1.0, 1.0);
-            let (a, av) = st.last_draw.unwrap_or((idx, val));
-            let (lo, hi) = if a <= idx { (a, idx) } else { (idx, a) };
-            for i in lo..=hi {
-                let t = if hi == lo {
-                    1.0
-                } else {
-                    (i - lo) as f32 / (hi - lo) as f32
-                };
-                let v = if a <= idx {
-                    av + (val - av) * t
-                } else {
-                    val + (av - val) * t
-                };
-                ex.curves[sel].0[i] = v;
+    st.curve_rect = Some(rect);
+    let half = rect.height() * 0.48;
+    let to_point = |p: Pos2| {
+        let idx = (((p.x - rect.left()) / rect.width()) * 255.0).clamp(0.0, 255.0) as usize;
+        let val = ((mid - p.y) / half).clamp(-1.0, 1.0);
+        (idx, val)
+    };
+
+    match st.curve_tool {
+        CurveTool::Draw => {
+            // Freehand drawing with gap interpolation.
+            if resp.dragged() || resp.clicked() {
+                if let Some(p) = resp.interact_pointer_pos() {
+                    let (idx, val) = to_point(p);
+                    let (a, av) = st.last_draw.unwrap_or((idx, val));
+                    ex.curves[sel].line(a, av, idx, val);
+                    st.last_draw = Some((idx, val));
+                    *ex_changed = true;
+                }
             }
-            st.last_draw = Some((idx, val));
-            *ex_changed = true;
+            if resp.drag_stopped() {
+                st.last_draw = None;
+            }
         }
-    }
-    if resp.drag_stopped() {
-        st.last_draw = None;
+        CurveTool::Line => {
+            if resp.drag_started() {
+                st.line_start = ui.input(|i| i.pointer.press_origin()).map(to_point);
+            }
+            let end = ui.input(|i| i.pointer.latest_pos()).map(to_point);
+            if let (Some((i0, v0)), Some((i1, v1))) = (st.line_start, end) {
+                if resp.dragged() {
+                    let x = |i: usize| rect.left() + i as f32 / 255.0 * rect.width();
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(x(i0), mid - v0 * half),
+                            Pos2::new(x(i1), mid - v1 * half),
+                        ],
+                        Stroke::new(1.5_f32, BRIGHT),
+                    );
+                }
+                if resp.drag_stopped() {
+                    ex.curves[sel].line(i0, v0, i1, v1);
+                    *ex_changed = true;
+                }
+            }
+            if resp.drag_stopped() {
+                st.line_start = None;
+            }
+        }
     }
 
     ui.add_space(GAP * 2.0);
+    if st.quant == 0 {
+        st.quant = 8;
+    }
     ui.horizontal(|ui| {
-        section_label(ui, "PRESET");
-        let seed = entropy_seed();
-        let presets: [(&str, Curve); 6] = [
-            ("RAMP", Curve::ramp()),
-            ("SINE", Curve::sine()),
-            ("TRI", Curve::triangle()),
-            ("SQR", Curve::square()),
-            ("STEPS", Curve::steps(8, seed)),
-            ("WALK", Curve::random_walk(seed)),
-        ];
-        for (name, c) in presets {
-            if tbtn(ui, name, false, 56.0).clicked() {
-                ex.curves[sel] = c.clone();
-                *ex_changed = true;
-            }
+        section_label(ui, "TOOL");
+        if tbtn(ui, "DRAW", st.curve_tool == CurveTool::Draw, 52.0).clicked() {
+            st.curve_tool = CurveTool::Draw;
+            st.line_start = None;
+            st.last_draw = None;
+        }
+        if tbtn(ui, "LINE", st.curve_tool == CurveTool::Line, 52.0).clicked() {
+            st.curve_tool = CurveTool::Line;
+            st.line_start = None;
+            st.last_draw = None;
+        }
+        ui.add_space(12.0);
+        section_label(ui, "QUANT");
+        if tbtn(ui, "-", false, 24.0).clicked() {
+            st.quant = (st.quant - 1).max(2);
+        }
+        let (qr, _) = ui.allocate_exact_size(vec2(32.0, CELL_H), Sense::hover());
+        txt(
+            ui,
+            qr.center(),
+            Align2::CENTER_CENTER,
+            &st.quant.to_string(),
+            10.0,
+            BRIGHT,
+        );
+        if tbtn(ui, "+", false, 24.0).clicked() {
+            st.quant = (st.quant + 1).min(64);
+        }
+        if tbtn(ui, "APPLY", false, 56.0).clicked() {
+            ex.curves[sel].quantize(st.quant);
+            *ex_changed = true;
+        }
+        ui.add_space(12.0);
+        section_label(ui, "SHIFT");
+        if tbtn(ui, "\u{25C0}", false, 32.0).clicked() {
+            ex.curves[sel].shift_phase(-1.0 / 32.0);
+            *ex_changed = true;
+        }
+        if tbtn(ui, "\u{25B6}", false, 32.0).clicked() {
+            ex.curves[sel].shift_phase(1.0 / 32.0);
+            *ex_changed = true;
         }
         ui.add_space(12.0);
         section_label(ui, "OPS");
@@ -1643,6 +1712,43 @@ fn curves_screen(
             *ex_changed = true;
         }
     });
+
+    // Preset bank: thumbnails only, built once.
+    if st.presets.is_empty() {
+        st.presets = (0..N_PRESETS).map(Curve::preset).collect();
+    }
+    ui.add_space(GAP);
+    section_label(ui, "PRESETS");
+    st.thumb_rects.clear();
+    let (tw, th) = (48.0, 30.0);
+    egui::ScrollArea::vertical()
+        .id_salt("curve_presets")
+        .max_height(th * 3.0 + GAP * 4.0)
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for c in st.presets.iter() {
+                    let (r, tresp) = ui.allocate_exact_size(vec2(tw, th), Sense::click());
+                    fill(ui, r, HEADER);
+                    frame(ui, r, if tresp.hovered() { ACCENT } else { BORDER });
+                    let pts: Vec<Pos2> = (0..32)
+                        .map(|k| {
+                            let v = c.0[k * 8];
+                            Pos2::new(
+                                r.left() + 2.0 + k as f32 / 31.0 * (tw - 4.0),
+                                r.center().y - v * (th * 0.5 - 4.0),
+                            )
+                        })
+                        .collect();
+                    ui.painter()
+                        .add(egui::Shape::line(pts, Stroke::new(1.0_f32, ACCENT)));
+                    if tresp.clicked() {
+                        ex.curves[sel] = c.clone();
+                        *ex_changed = true;
+                    }
+                    st.thumb_rects.push(r);
+                }
+            });
+        });
     ui.add_space(GAP);
     txt(
         ui,
@@ -2031,5 +2137,96 @@ mod gui_tests {
 
         let _ = std::fs::remove_file(&wav_a);
         let _ = std::fs::remove_file(&wav_b);
+    }
+
+    /// Run one frame with `events` on `st` and return nothing; shared by the
+    /// curve-tool tests below.
+    fn curve_frame(
+        ctx: &Context,
+        setter: &ParamSetter,
+        params: &Arc<MangleParams>,
+        st: &mut UiState,
+        time: &mut f64,
+        events: Vec<Event>,
+    ) {
+        *time += 0.05;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 700.0))),
+            time: Some(*time),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| draw_editor(ctx, setter, params, st));
+    }
+
+    #[test]
+    fn line_tool_writes_straight_segment() {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState {
+            tab: Tab::Curves,
+            selected_curve: 3,
+            curve_tool: CurveTool::Line,
+            ..Default::default()
+        };
+        let mut time = 0.0;
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        let r = st.curve_rect.expect("canvas rect");
+        let mid = r.center().y;
+        let half = r.height() * 0.48;
+        let p0 = Pos2::new(r.left() + r.width() * 0.25, mid + half * 0.5);
+        let p1 = Pos2::new(r.left() + r.width() * 0.75, mid - half * 0.5);
+        let mut ev = Vec::new();
+        drag(
+            &mut ev,
+            p0,
+            (1..=10).map(|k| p0 + (p1 - p0) * (k as f32 / 10.0)),
+        );
+        let release = ev.pop().unwrap();
+        let moves = ev.split_off(2);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, ev);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, moves);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![release]);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+
+        let c = params.extra.read().unwrap().curves[3].clone();
+        let idx = |p: Pos2| (((p.x - r.left()) / r.width()) * 255.0) as usize;
+        let (i0, i1) = (idx(p0), idx(p1));
+        let (v0, v1) = (c.0[i0], c.0[i1]);
+        assert!(
+            (v0 + 0.5).abs() < 0.02 && (v1 - 0.5).abs() < 0.02,
+            "{v0} {v1}"
+        );
+        for i in i0..=i1 {
+            let want = v0 + (v1 - v0) * (i - i0) as f32 / (i1 - i0) as f32;
+            assert!((c.0[i] - want).abs() < 1e-4, "not linear at {i}");
+        }
+    }
+
+    #[test]
+    fn clicking_thumbnail_replaces_curve() {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState {
+            tab: Tab::Curves,
+            selected_curve: 2,
+            ..Default::default()
+        };
+        let mut time = 0.0;
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        assert_eq!(st.presets.len(), N_PRESETS);
+        let want = 5usize;
+        let r = st.thumb_rects[want];
+        let mut ev = Vec::new();
+        click(&mut ev, r.center().x, r.center().y);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, ev);
+        let c = params.extra.read().unwrap().curves[2].clone();
+        assert_eq!(c.0, Curve::preset(want).0);
     }
 }
