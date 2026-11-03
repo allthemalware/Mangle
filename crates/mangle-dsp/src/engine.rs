@@ -318,6 +318,12 @@ pub struct Lane {
     /// phase = uninitialized (first chunk after reset has zero velocity).
     pos_phase: [f64; 2],
     pos_vel: [f64; 2],
+    /// Pos>Pitch: slow signed average (300 ms) of the accepted velocity; NaN =
+    /// not yet seeded. Jumps (wrap sweeps) are measured against it.
+    pos_avg: [f64; 2],
+    /// Pos>Pitch: samples spent in the current jump; a jump lasting over
+    /// 150 ms is accepted as a real speed change.
+    pos_jump: [u32; 2],
     /// Spectral-mode phase vocoder. Pre-allocated (boxed to keep `Lane`
     /// small) so switching into Spectral never allocates on the audio thread.
     spectral: Box<SpectralState>,
@@ -337,6 +343,8 @@ impl Lane {
             playheads: [0.0; 2],
             pos_phase: [f64::NAN; 2],
             pos_vel: [0.0; 2],
+            pos_avg: [f64::NAN; 2],
+            pos_jump: [0; 2],
             spectral: Box::new(SpectralState::new()),
             spawned: 0,
         }
@@ -430,6 +438,8 @@ impl Lane {
         self.playheads = [0.0; 2];
         self.pos_phase = [f64::NAN; 2];
         self.pos_vel = [0.0; 2];
+        self.pos_avg = [f64::NAN; 2];
+        self.pos_jump = [0; 2];
         self.spectral.reset();
     }
 
@@ -449,6 +459,8 @@ impl Lane {
         self.playheads = [0.0; 2];
         self.pos_phase = [f64::NAN; 2];
         self.pos_vel = [0.0; 2];
+        self.pos_avg = [f64::NAN; 2];
+        self.pos_jump = [0; 2];
         self.spectral.reset();
     }
 
@@ -571,13 +583,34 @@ impl Lane {
                         // The scan phase wraps 0..1; unwrap the jump so it isn't a chirp.
                         let mut d = cur - self.pos_phase[ch];
                         d -= d.round();
-                        // The curve's closing segment sweeps back to its start
-                        // over several blocks, too fast to be a real scrub:
-                        // treat motion beyond the clamp as a jump, not a drag.
-                        let v = d * wlen as f64 / block.max(1) as f64;
-                        if v.abs() > 32.0 {
-                            0.0
+                        let blk = block.max(1);
+                        let raw = d * wlen as f64 / blk as f64;
+                        let avg = self.pos_avg[ch];
+                        if avg.is_nan() {
+                            // First measured chunk: seed the average.
+                            if raw.abs() > 32.0 {
+                                0.0
+                            } else {
+                                self.pos_avg[ch] = raw;
+                                raw
+                            }
+                        } else if raw.abs() > 32.0 || raw.abs() > 4.0 * avg.abs().max(0.25) {
+                            // A wrap segment sweeps back too fast to be a real
+                            // scrub: hold the recent speed unless it persists.
+                            self.pos_jump[ch] = self.pos_jump[ch].saturating_add(blk as u32);
+                            if self.pos_jump[ch] as f64 > 0.15 * sample_rate as f64 {
+                                let v = raw.clamp(-32.0, 32.0);
+                                self.pos_avg[ch] = v;
+                                self.pos_jump[ch] = 0;
+                                v
+                            } else {
+                                avg
+                            }
                         } else {
+                            let a = 1.0 - (-(blk as f64) / (0.3 * sample_rate as f64)).exp();
+                            let v = raw.clamp(-32.0, 32.0);
+                            self.pos_avg[ch] = avg + a * (v - avg);
+                            self.pos_jump[ch] = 0;
                             v
                         }
                     };
