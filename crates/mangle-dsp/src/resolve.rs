@@ -241,7 +241,7 @@ mod tests {
         let (t, mut p) = setup();
         assert!((div_to_hz(23, 120.0) - 4.0).abs() < 1e-4); // 1/8 @ 120
         assert!((div_to_hz(20, 90.0) - 1.5).abs() < 1e-4); // 1/4 @ 90
-        // Switch Grain 1 to tempo mode, division stays the 1/8 default.
+                                                           // Switch Grain 1 to tempo mode, division stays the 1/8 default.
         let pos = t.pos(pid(Module::Grain, 0, 2));
         p.values[pos] = 1.0;
         let (lp, _) = lane_params(&p, &t, 0, 120.0, 60.0, true, true);
@@ -309,8 +309,14 @@ mod tests {
         let pos = t.pos(pid(Module::Grain, 0, GRAIN_MODE_IDX));
         let map = t.infos[pos].map;
         p.values[pos] = step_norm(map, 1);
-        assert_eq!(lane_params(&p, &t, 0, 120.0, 60.0, true, true).0.mode, GrainMode::Stretch);
+        assert_eq!(
+            lane_params(&p, &t, 0, 120.0, 60.0, true, true).0.mode,
+            GrainMode::Stretch
+        );
         p.values[pos] = step_norm(map, 2);
-        assert_eq!(lane_params(&p, &t, 0, 120.0, 60.0, true, true).0.mode, GrainMode::Cloud);
+        assert_eq!(
+            lane_params(&p, &t, 0, 120.0, 60.0, true, true).0.mode,
+            GrainMode::Cloud
+        );
     }
 }

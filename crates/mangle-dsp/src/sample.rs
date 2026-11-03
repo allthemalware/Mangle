@@ -134,7 +134,9 @@ pub struct SampleBank {
 
 impl SampleBank {
     pub fn new() -> Self {
-        Self { slots: [None, None, None, None, None, None] }
+        Self {
+            slots: [None, None, None, None, None, None],
+        }
     }
 
     /// Indices of loaded slots, in slot order, allocation-free.
@@ -186,7 +188,8 @@ fn sinc_table() -> &'static SincTable {
                 };
                 // Blackman window over the 8-tap span (|x| <= 4).
                 let u = (x / 4.0).clamp(-1.0, 1.0);
-                let w = 0.42 + 0.5 * (core::f32::consts::PI * u).cos()
+                let w = 0.42
+                    + 0.5 * (core::f32::consts::PI * u).cos()
                     + 0.08 * (2.0 * core::f32::consts::PI * u).cos();
                 *t = sinc * w;
                 sum += *t;

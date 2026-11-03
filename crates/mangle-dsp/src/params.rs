@@ -39,14 +39,27 @@ pub mod flags {
 /// Display-value mapping for a normalized 0..1 parameter.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Map {
-    Lin { min: f32, max: f32 },
+    Lin {
+        min: f32,
+        max: f32,
+    },
     /// display = max * n^3 — zero-anchored quasi-exponential taper.
-    Cube { max: f32 },
+    Cube {
+        max: f32,
+    },
     /// Linear in dB.
-    Db { min: f32, max: f32 },
+    Db {
+        min: f32,
+        max: f32,
+    },
     Bool,
-    Steps { count: u16 },
-    Int { min: i32, max: i32 },
+    Steps {
+        count: u16,
+    },
+    Int {
+        min: i32,
+        max: i32,
+    },
 }
 
 impl Map {
@@ -139,9 +152,37 @@ pub const DIV_1_8: f32 = 23.0;
 /// Length of each division in beats (quarter notes); `T` = triplet (×2/3).
 /// One modulation/emission cycle spans this many beats.
 pub const DIV_BEATS: [f32; 31] = [
-    32.0, 28.0, 24.0, 20.0, 16.0, 12.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.5, 3.0, 2.5, 2.0, 1.75,
-    2.5 * 2.0 / 3.0, 1.5, 4.0 / 3.0, 1.25, 1.0, 0.75, 2.0 / 3.0, 0.5, 1.0 / 3.0, 0.25,
-    1.0 / 6.0, 0.125, 1.0 / 12.0, 0.0625, 0.03125,
+    32.0,
+    28.0,
+    24.0,
+    20.0,
+    16.0,
+    12.0,
+    8.0,
+    7.0,
+    6.0,
+    5.0,
+    4.0,
+    3.5,
+    3.0,
+    2.5,
+    2.0,
+    1.75,
+    2.5 * 2.0 / 3.0,
+    1.5,
+    4.0 / 3.0,
+    1.25,
+    1.0,
+    0.75,
+    2.0 / 3.0,
+    0.5,
+    1.0 / 3.0,
+    0.25,
+    1.0 / 6.0,
+    0.125,
+    1.0 / 12.0,
+    0.0625,
+    0.03125,
 ];
 
 // ---------------------------------------------------------------- specs ---
@@ -149,10 +190,40 @@ pub const DIV_BEATS: [f32; 31] = [
 fn global_specs() -> Vec<Spec> {
     vec![
         Spec("On", "", Map::Bool, 1.0, A_S, false),
-        Spec("Key", "%", Map::Lin { min: 0.0, max: 100.0 }, 100.0, A, false),
-        Spec("Stereo", "%", Map::Lin { min: 0.0, max: 200.0 }, 100.0, A_M, false),
+        Spec(
+            "Key",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            100.0,
+            A,
+            false,
+        ),
+        Spec(
+            "Stereo",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 200.0,
+            },
+            100.0,
+            A_M,
+            false,
+        ),
         Spec("Squeeze", "", Map::Bool, 1.0, A_S, false),
-        Spec("Level", "dB", Map::Db { min: -60.0, max: 6.0 }, 0.0, A_M, false),
+        Spec(
+            "Level",
+            "dB",
+            Map::Db {
+                min: -60.0,
+                max: 6.0,
+            },
+            0.0,
+            A_M,
+            false,
+        ),
         Spec("Voices", "", Map::Int { min: 1, max: 16 }, 8.0, S, false),
     ]
 }
@@ -163,25 +234,154 @@ fn grain_specs() -> Vec<Spec> {
         Spec("Gate", "", Map::Bool, 0.0, A | M | PN | S, false), // 0 (G1 default overridden to on)
         Spec("Rate", "Hz", Map::Cube { max: 500.0 }, 10.0, A_M_PN, false), // 1
         Spec("Rate Tempo", "", Map::Bool, 0.0, A_S, false),      // 2
-        Spec("Rate Div", "", Map::Steps { count: N_DIVS }, DIV_1_8, A_S, false), // 3
-        Spec("Jitter", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M_PN, false), // 4
+        Spec(
+            "Rate Div",
+            "",
+            Map::Steps { count: N_DIVS },
+            DIV_1_8,
+            A_S,
+            false,
+        ), // 3
+        Spec(
+            "Jitter",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M_PN,
+            false,
+        ), // 4
         Spec("Rate>Len", "", Map::Bool, 1.0, A_S, false),        // 5
-        Spec("Length", "%|ms", Map::Cube { max: 1000.0 }, 100.0, A_M_PN, false), // 6
-        Spec("Pan", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M_PN, false), // 7
-        Spec("Level", "%", Map::Lin { min: 0.0, max: 100.0 }, 100.0, A_M_PN, false), // 8
-        Spec("Sample", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M_PN, false), // 9
-        Spec("Position", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M_PN, false), // 10
+        Spec(
+            "Length",
+            "%|ms",
+            Map::Cube { max: 1000.0 },
+            100.0,
+            A_M_PN,
+            false,
+        ), // 6
+        Spec(
+            "Pan",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M_PN,
+            false,
+        ), // 7
+        Spec(
+            "Level",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            100.0,
+            A_M_PN,
+            false,
+        ), // 8
+        Spec(
+            "Sample",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M_PN,
+            false,
+        ), // 9
+        Spec(
+            "Position",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M_PN,
+            false,
+        ), // 10
         Spec("Loop", "", Map::Bool, 1.0, A_S, false),            // 11
-        Spec("Loop Size", "x", Map::Lin { min: 0.0, max: 2.0 }, 1.0, A_M_PN, false), // 12
+        Spec(
+            "Loop Size",
+            "x",
+            Map::Lin { min: 0.0, max: 2.0 },
+            1.0,
+            A_M_PN,
+            false,
+        ), // 12
         Spec("Gate Sync", "", Map::Bool, 0.0, A_S, false),       // 13
-        Spec("Pitch", "st", Map::Lin { min: -12.0, max: 12.0 }, 0.0, A_M_PN, true), // 14
+        Spec(
+            "Pitch",
+            "st",
+            Map::Lin {
+                min: -12.0,
+                max: 12.0,
+            },
+            0.0,
+            A_M_PN,
+            true,
+        ), // 14
         Spec("Pos>Pitch", "", Map::Bool, 0.0, A_S, false),       // 15
-        Spec("Direction", "%", Map::Lin { min: -100.0, max: 100.0 }, 100.0, A_M_PN, true), // 16
-        Spec("Shape", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M_PN, false), // 17
-        Spec("Skew", "%", Map::Lin { min: -100.0, max: 100.0 }, 0.0, A_M_PN, true), // 18
+        Spec(
+            "Direction",
+            "%",
+            Map::Lin {
+                min: -100.0,
+                max: 100.0,
+            },
+            100.0,
+            A_M_PN,
+            true,
+        ), // 16
+        Spec(
+            "Shape",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M_PN,
+            false,
+        ), // 17
+        Spec(
+            "Skew",
+            "%",
+            Map::Lin {
+                min: -100.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M_PN,
+            true,
+        ), // 18
         Spec("Algo", "", Map::Steps { count: 4 }, 1.0, A_S, false), // 19 [new] read/stretch algorithm
-        Spec("Mode", "", Map::Steps { count: N_GRAIN_MODES }, 0.0, A_S, false), // 20 [new] synthesis mode
-        Spec("Quant", "", Map::Steps { count: N_PITCH_QUANT }, 0.0, A_S, false), // 21 [new] pitch scale lock
+        Spec(
+            "Mode",
+            "",
+            Map::Steps {
+                count: N_GRAIN_MODES,
+            },
+            0.0,
+            A_S,
+            false,
+        ), // 20 [new] synthesis mode
+        Spec(
+            "Quant",
+            "",
+            Map::Steps {
+                count: N_PITCH_QUANT,
+            },
+            0.0,
+            A_S,
+            false,
+        ), // 21 [new] pitch scale lock
     ]
 }
 pub const GRAIN_LEVEL_IDX: u8 = 8;
@@ -204,16 +404,60 @@ pub const N_GRAIN_MODES: u16 = 4;
 fn lfo_specs(loop_lfo: bool) -> Vec<Spec> {
     let rate_default = if loop_lfo { 0.10 } else { 1.0 };
     vec![
-        Spec("Gate", "", Map::Bool, 1.0, A | M | S, false),    // 0
-        Spec("Transport", "", Map::Bool, 0.0, A_S, false),     // 1
-        Spec("Rate", "Hz", Map::Cube { max: 50.0 }, rate_default, A_M_PN, false), // 2
-        Spec("Rate Tempo", "", Map::Bool, 0.0, A_S, false),    // 3
-        Spec("Rate Div", "", Map::Steps { count: N_DIVS }, DIV_1_4, A_S, false), // 4
-        Spec("Phase", "deg", Map::Lin { min: 0.0, max: 360.0 }, 0.0, A_M_PN, false), // 5
-        Spec("St.Phase", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M, false), // 6
-        Spec("Lag", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M, false), // 7
-        Spec("Trig", "", Map::Bool, 0.0, A | PN | S, false),   // 8 (edge-triggered)
-        Spec("One-Shot", "", Map::Bool, 0.0, A_S, false),      // 9 [new] MSEG envelope mode
+        Spec("Gate", "", Map::Bool, 1.0, A | M | S, false), // 0
+        Spec("Transport", "", Map::Bool, 0.0, A_S, false),  // 1
+        Spec(
+            "Rate",
+            "Hz",
+            Map::Cube { max: 50.0 },
+            rate_default,
+            A_M_PN,
+            false,
+        ), // 2
+        Spec("Rate Tempo", "", Map::Bool, 0.0, A_S, false), // 3
+        Spec(
+            "Rate Div",
+            "",
+            Map::Steps { count: N_DIVS },
+            DIV_1_4,
+            A_S,
+            false,
+        ), // 4
+        Spec(
+            "Phase",
+            "deg",
+            Map::Lin {
+                min: 0.0,
+                max: 360.0,
+            },
+            0.0,
+            A_M_PN,
+            false,
+        ), // 5
+        Spec(
+            "St.Phase",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M,
+            false,
+        ), // 6
+        Spec(
+            "Lag",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M,
+            false,
+        ), // 7
+        Spec("Trig", "", Map::Bool, 0.0, A | PN | S, false), // 8 (edge-triggered)
+        Spec("One-Shot", "", Map::Bool, 0.0, A_S, false),   // 9 [new] MSEG envelope mode
     ]
 }
 pub const LFO_TRIG_IDX: u8 = 8;
@@ -221,15 +465,62 @@ pub const LFO_ONESHOT_IDX: u8 = 9;
 pub const N_LFO_PARAMS: usize = 10;
 
 fn stphase_specs() -> Vec<Spec> {
-    vec![Spec("St.Phase", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M, false)]
+    vec![Spec(
+        "St.Phase",
+        "%",
+        Map::Lin {
+            min: 0.0,
+            max: 100.0,
+        },
+        0.0,
+        A_M,
+        false,
+    )]
 }
 
 fn slot_specs() -> Vec<Spec> {
     vec![
-        Spec("Root Note", "", Map::Int { min: 0, max: 127 }, 60.0, S, false), // 0
-        Spec("Loop Start", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A, false), // 1
-        Spec("Loop End", "%", Map::Lin { min: 0.0, max: 100.0 }, 100.0, A, false), // 2
-        Spec("Gain", "dB", Map::Db { min: -12.0, max: 12.0 }, 0.0, A_M, true), // 3
+        Spec(
+            "Root Note",
+            "",
+            Map::Int { min: 0, max: 127 },
+            60.0,
+            S,
+            false,
+        ), // 0
+        Spec(
+            "Loop Start",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            0.0,
+            A,
+            false,
+        ), // 1
+        Spec(
+            "Loop End",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            100.0,
+            A,
+            false,
+        ), // 2
+        Spec(
+            "Gain",
+            "dB",
+            Map::Db {
+                min: -12.0,
+                max: 12.0,
+            },
+            0.0,
+            A_M,
+            true,
+        ), // 3
     ]
 }
 pub const SLOT_LOOP_START_IDX: u8 = 1;
@@ -240,10 +531,36 @@ pub const SLOT_LOOP_END_IDX: u8 = 2;
 /// when first switched on). Cutoff/Reso are modulatable (host + future matrix).
 fn fx_specs() -> Vec<Spec> {
     vec![
-        Spec("On", "", Map::Bool, 0.0, A_S, false),                              // 0
-        Spec("Type", "", Map::Steps { count: N_FILTER_TYPES }, 0.0, A_S, false), // 1 LP/BP/HP/Notch
-        Spec("Cutoff", "Hz", Map::Cube { max: 20000.0 }, 20000.0, A_M, false),   // 2
-        Spec("Reso", "%", Map::Lin { min: 0.0, max: 100.0 }, 0.0, A_M, false),   // 3
+        Spec("On", "", Map::Bool, 0.0, A_S, false), // 0
+        Spec(
+            "Type",
+            "",
+            Map::Steps {
+                count: N_FILTER_TYPES,
+            },
+            0.0,
+            A_S,
+            false,
+        ), // 1 LP/BP/HP/Notch
+        Spec(
+            "Cutoff",
+            "Hz",
+            Map::Cube { max: 20000.0 },
+            20000.0,
+            A_M,
+            false,
+        ), // 2
+        Spec(
+            "Reso",
+            "%",
+            Map::Lin {
+                min: 0.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M,
+            false,
+        ), // 3
     ]
 }
 /// Filter responses (`crate::filter::FilterType`). Append-only.
@@ -252,12 +569,64 @@ pub const N_FILTER_TYPES: u16 = 4;
 fn matrix_specs() -> Vec<Spec> {
     use crate::matrix::{DEST_COUNT, SOURCE_COUNT};
     vec![
-        Spec("Source", "", Map::Steps { count: SOURCE_COUNT }, 0.0, A_S, false), // 0
-        Spec("Amt 1", "", Map::Lin { min: -100.0, max: 100.0 }, 0.0, A_M, true), // 1
-        Spec("Dest 1", "", Map::Steps { count: DEST_COUNT }, 0.0, A_S, false),   // 2
-        Spec("Amt 2", "", Map::Lin { min: -100.0, max: 100.0 }, 0.0, A_M, true), // 3
-        Spec("Dest 2", "", Map::Steps { count: DEST_COUNT }, 0.0, A_S, false),   // 4
-        Spec("Scale", "", Map::Steps { count: SOURCE_COUNT }, 0.0, A_S, false),  // 5
+        Spec(
+            "Source",
+            "",
+            Map::Steps {
+                count: SOURCE_COUNT,
+            },
+            0.0,
+            A_S,
+            false,
+        ), // 0
+        Spec(
+            "Amt 1",
+            "",
+            Map::Lin {
+                min: -100.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M,
+            true,
+        ), // 1
+        Spec(
+            "Dest 1",
+            "",
+            Map::Steps { count: DEST_COUNT },
+            0.0,
+            A_S,
+            false,
+        ), // 2
+        Spec(
+            "Amt 2",
+            "",
+            Map::Lin {
+                min: -100.0,
+                max: 100.0,
+            },
+            0.0,
+            A_M,
+            true,
+        ), // 3
+        Spec(
+            "Dest 2",
+            "",
+            Map::Steps { count: DEST_COUNT },
+            0.0,
+            A_S,
+            false,
+        ), // 4
+        Spec(
+            "Scale",
+            "",
+            Map::Steps {
+                count: SOURCE_COUNT,
+            },
+            0.0,
+            A_S,
+            false,
+        ), // 5
     ]
 }
 pub const N_MATRIX_ROWS: u8 = 32;
@@ -296,7 +665,10 @@ pub fn build_param_table() -> Vec<ParamInfo> {
         let spec = vec![Spec(
             "Value",
             "%",
-            Map::Lin { min: -100.0, max: 100.0 },
+            Map::Lin {
+                min: -100.0,
+                max: 100.0,
+            },
             0.0,
             A | M | PN,
             true,
@@ -311,22 +683,58 @@ pub fn build_param_table() -> Vec<ParamInfo> {
         push(&mut t, Module::Grain, g, &format!("Grain {}", g + 1), s);
     }
     for l in 0..3u8 {
-        push(&mut t, Module::LoopLfo, l, &format!("Loop LFO {}", l + 1), lfo_specs(true));
+        push(
+            &mut t,
+            Module::LoopLfo,
+            l,
+            &format!("Loop LFO {}", l + 1),
+            lfo_specs(true),
+        );
     }
     for l in 0..6u8 {
-        push(&mut t, Module::Lfo, l, &format!("LFO {}", l + 1), lfo_specs(false));
+        push(
+            &mut t,
+            Module::Lfo,
+            l,
+            &format!("LFO {}", l + 1),
+            lfo_specs(false),
+        );
     }
     for d in 0..3u8 {
-        push(&mut t, Module::Drift, d, &format!("Drift {}", d + 1), stphase_specs());
+        push(
+            &mut t,
+            Module::Drift,
+            d,
+            &format!("Drift {}", d + 1),
+            stphase_specs(),
+        );
     }
     for n in 0..3u8 {
-        push(&mut t, Module::Noise, n, &format!("Noise {}", n + 1), stphase_specs());
+        push(
+            &mut t,
+            Module::Noise,
+            n,
+            &format!("Noise {}", n + 1),
+            stphase_specs(),
+        );
     }
     for s in 0..6u8 {
-        push(&mut t, Module::Slot, s, &format!("Slot {}", s + 1), slot_specs());
+        push(
+            &mut t,
+            Module::Slot,
+            s,
+            &format!("Slot {}", s + 1),
+            slot_specs(),
+        );
     }
     for r in 0..N_MATRIX_ROWS {
-        push(&mut t, Module::Matrix, r, &format!("Mod {:02}", r), matrix_specs());
+        push(
+            &mut t,
+            Module::Matrix,
+            r,
+            &format!("Mod {:02}", r),
+            matrix_specs(),
+        );
     }
     push(&mut t, Module::Fx, 0, "Filter", fx_specs());
     t
@@ -437,7 +845,7 @@ mod tests {
         assert_eq!(p.get(&t, pid(Module::Grain, 0, 0)), 1.0); // Grain 1 Gate on
         assert_eq!(p.get(&t, pid(Module::Grain, 1, 0)), 0.0); // Grain 2 Gate off
         assert_eq!(p.get(&t, pid(Module::Grain, 2, 0)), 0.0); // Grain 3 Gate off
-        // Grain Rate default 10 Hz round-trips through the cube taper.
+                                                              // Grain Rate default 10 Hz round-trips through the cube taper.
         let info = t.get(pid(Module::Grain, 0, 1));
         let disp = info.map.to_display(p.get(&t, info.id));
         assert!((disp - 10.0).abs() < 0.05, "grain rate default = {disp}");
@@ -446,9 +854,15 @@ mod tests {
     #[test]
     fn map_roundtrips() {
         let maps = [
-            Map::Lin { min: -12.0, max: 12.0 },
+            Map::Lin {
+                min: -12.0,
+                max: 12.0,
+            },
             Map::Cube { max: 500.0 },
-            Map::Db { min: -60.0, max: 6.0 },
+            Map::Db {
+                min: -60.0,
+                max: 6.0,
+            },
             Map::Steps { count: N_DIVS },
             Map::Int { min: 1, max: 16 },
         ];

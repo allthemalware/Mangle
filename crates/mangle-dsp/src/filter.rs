@@ -37,7 +37,12 @@ pub struct Svf {
 
 impl Default for Svf {
     fn default() -> Self {
-        Self { ic1: 0.0, ic2: 0.0, g: 0.1, k: 1.0 }
+        Self {
+            ic1: 0.0,
+            ic2: 0.0,
+            g: 0.1,
+            k: 1.0,
+        }
     }
 }
 
@@ -110,7 +115,10 @@ mod tests {
         let pass = tone_rms(200.0, 1000.0, 0.0, FilterType::Lowpass, sr);
         let stop = tone_rms(8000.0, 1000.0, 0.0, FilterType::Lowpass, sr);
         assert!(pass > 0.5, "LP killed its passband: {pass}");
-        assert!(stop < 0.2 * pass, "LP failed to attenuate 8 kHz: {stop} vs {pass}");
+        assert!(
+            stop < 0.2 * pass,
+            "LP failed to attenuate 8 kHz: {stop} vs {pass}"
+        );
     }
 
     #[test]
@@ -128,7 +136,10 @@ mod tests {
         let below = tone_rms(100.0, 1000.0, 0.6, FilterType::Bandpass, sr);
         let center = tone_rms(1000.0, 1000.0, 0.6, FilterType::Bandpass, sr);
         let above = tone_rms(9000.0, 1000.0, 0.6, FilterType::Bandpass, sr);
-        assert!(center > below && center > above, "BP not centered: {below}/{center}/{above}");
+        assert!(
+            center > below && center > above,
+            "BP not centered: {below}/{center}/{above}"
+        );
     }
 
     #[test]

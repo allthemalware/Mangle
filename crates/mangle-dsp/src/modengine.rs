@@ -34,7 +34,9 @@ pub struct SourceValues {
 
 impl SourceValues {
     pub fn zero() -> Self {
-        Self { v: [[0.0; N_SOURCES]; 2] }
+        Self {
+            v: [[0.0; N_SOURCES]; 2],
+        }
     }
 
     pub fn set(&mut self, s: ModSource, l: f32, r: f32) {
@@ -130,7 +132,14 @@ pub struct DecodedRow {
 
 impl Default for DecodedRow {
     fn default() -> Self {
-        Self { source: 0, scale: 0, amt1: 0.0, t1: Target::None, amt2: 0.0, t2: Target::None }
+        Self {
+            source: 0,
+            scale: 0,
+            amt1: 0.0,
+            t1: Target::None,
+            amt2: 0.0,
+            t2: Target::None,
+        }
     }
 }
 
@@ -138,7 +147,10 @@ impl Default for DecodedRow {
 /// Decode once per block from the base patch (routing and amounts are not
 /// per-note-modulatable).
 pub fn decode_matrix(patch: &Patch, table: &ParamTable, out: &mut [DecodedRow; 32]) -> usize {
-    let amt_map = Map::Lin { min: -100.0, max: 100.0 };
+    let amt_map = Map::Lin {
+        min: -100.0,
+        max: 100.0,
+    };
     let src_steps = (matrix::SOURCE_COUNT - 1) as f32;
     let dst_steps = (matrix::DEST_COUNT - 1) as f32;
     let mut n = 0;
@@ -171,7 +183,11 @@ pub fn decode_matrix(patch: &Patch, table: &ParamTable, out: &mut [DecodedRow; 3
 #[inline]
 fn contribution(row: &DecodedRow, sv: &SourceValues, ch: usize) -> f32 {
     let src = sv.v[ch][row.source];
-    let scale = if row.scale != 0 { sv.v[ch][row.scale] } else { 1.0 };
+    let scale = if row.scale != 0 {
+        sv.v[ch][row.scale]
+    } else {
+        1.0
+    };
     src * scale / 100.0
 }
 
@@ -413,6 +429,7 @@ mod tests {
     }
 
     /// Write one matrix row into the patch in normalized encoding.
+    #[allow(clippy::too_many_arguments)]
     fn set_row(
         patch: &mut Patch,
         table: &ParamTable,
@@ -443,10 +460,16 @@ mod tests {
             pitch,
             Target::VoiceParam(t.pos(pid(Module::Grain, 1, GRAIN_PITCH_IDX)) as u16)
         );
-        let lp = dest_target(dest_to_index(ModDest::Grain(0, GrainDest::LoopPosition)), &t);
+        let lp = dest_target(
+            dest_to_index(ModDest::Grain(0, GrainDest::LoopPosition)),
+            &t,
+        );
         assert_eq!(lp, Target::LoopPos(0));
         let lr = dest_target(dest_to_index(ModDest::Lfo(2, LfoDest::Rate)), &t);
-        assert_eq!(lr, Target::GlobalParam(t.pos(pid(Module::Lfo, 2, 2)) as u16));
+        assert_eq!(
+            lr,
+            Target::GlobalParam(t.pos(pid(Module::Lfo, 2, 2)) as u16)
+        );
         for i in 0..matrix::DEST_COUNT {
             let _ = dest_target(i, &t); // must not panic anywhere
         }
@@ -458,15 +481,27 @@ mod tests {
         let mut rows = [DecodedRow::default(); 32];
         assert_eq!(decode_matrix(&p, &t, &mut rows), 0);
         set_row(
-            &mut p, &t, 3,
-            ModSource::Lfo(0), 50.0, ModDest::Grain(0, GrainDest::Pitch),
-            0.0, ModDest::None, ModSource::None,
+            &mut p,
+            &t,
+            3,
+            ModSource::Lfo(0),
+            50.0,
+            ModDest::Grain(0, GrainDest::Pitch),
+            0.0,
+            ModDest::None,
+            ModSource::None,
         );
         // A row with a source but no destinations is also skipped.
         set_row(
-            &mut p, &t, 7,
-            ModSource::Drift(0), 80.0, ModDest::None,
-            0.0, ModDest::None, ModSource::None,
+            &mut p,
+            &t,
+            7,
+            ModSource::Drift(0),
+            80.0,
+            ModDest::None,
+            0.0,
+            ModDest::None,
+            ModSource::None,
         );
         let n = decode_matrix(&p, &t, &mut rows);
         assert_eq!(n, 1);
@@ -478,9 +513,15 @@ mod tests {
     fn voice_pass_modulates_per_channel() {
         let (t, mut p) = setup();
         set_row(
-            &mut p, &t, 0,
-            ModSource::Drift(0), 100.0, ModDest::Grain(0, GrainDest::Pitch),
-            0.0, ModDest::None, ModSource::None,
+            &mut p,
+            &t,
+            0,
+            ModSource::Drift(0),
+            100.0,
+            ModDest::Grain(0, GrainDest::Pitch),
+            0.0,
+            ModDest::None,
+            ModSource::None,
         );
         let mut rows = [DecodedRow::default(); 32];
         let n = decode_matrix(&p, &t, &mut rows);
@@ -506,9 +547,15 @@ mod tests {
         p.values[cut_pos as usize] = 0.5; // mid cutoff so mod can go both ways
 
         set_row(
-            &mut p, &t, 0,
-            ModSource::Drift(0), 100.0, ModDest::Fx(FxDest::Cutoff),
-            0.0, ModDest::None, ModSource::None,
+            &mut p,
+            &t,
+            0,
+            ModSource::Drift(0),
+            100.0,
+            ModDest::Fx(FxDest::Cutoff),
+            0.0,
+            ModDest::None,
+            ModSource::None,
         );
         let mut rows = [DecodedRow::default(); 32];
         let n = decode_matrix(&p, &t, &mut rows);
@@ -531,9 +578,15 @@ mod tests {
     fn scale_column_multiplies() {
         let (t, mut p) = setup();
         set_row(
-            &mut p, &t, 0,
-            ModSource::Lfo(0), 100.0, ModDest::Grain(0, GrainDest::Position),
-            0.0, ModDest::None, ModSource::Macro(0),
+            &mut p,
+            &t,
+            0,
+            ModSource::Lfo(0),
+            100.0,
+            ModDest::Grain(0, GrainDest::Position),
+            0.0,
+            ModDest::None,
+            ModSource::Macro(0),
         );
         let mut rows = [DecodedRow::default(); 32];
         let n = decode_matrix(&p, &t, &mut rows);
@@ -544,16 +597,26 @@ mod tests {
         let mut lp = [0.0f32; 3];
         let mut out = p.clone();
         apply_voice(&mut out, &rows[..n], &sv, 0, &mut lp);
-        assert!((out.values[pos] - 0.5).abs() < 1e-6, "got {}", out.values[pos]);
+        assert!(
+            (out.values[pos] - 0.5).abs() < 1e-6,
+            "got {}",
+            out.values[pos]
+        );
     }
 
     #[test]
     fn loop_position_accumulates_into_side_channel() {
         let (t, mut p) = setup();
         set_row(
-            &mut p, &t, 0,
-            ModSource::Const(100), 30.0, ModDest::Grain(2, GrainDest::LoopPosition),
-            0.0, ModDest::None, ModSource::None,
+            &mut p,
+            &t,
+            0,
+            ModSource::Const(100),
+            30.0,
+            ModDest::Grain(2, GrainDest::LoopPosition),
+            0.0,
+            ModDest::None,
+            ModSource::None,
         );
         let mut rows = [DecodedRow::default(); 32];
         let n = decode_matrix(&p, &t, &mut rows);
@@ -571,9 +634,15 @@ mod tests {
     fn scopes_are_disjoint() {
         let (t, mut p) = setup();
         set_row(
-            &mut p, &t, 0,
-            ModSource::Const(100), 50.0, ModDest::Lfo(1, LfoDest::Rate),
-            40.0, ModDest::Grain(0, GrainDest::Shape), ModSource::None,
+            &mut p,
+            &t,
+            0,
+            ModSource::Const(100),
+            50.0,
+            ModDest::Lfo(1, LfoDest::Rate),
+            40.0,
+            ModDest::Grain(0, GrainDest::Shape),
+            ModSource::None,
         );
         let mut rows = [DecodedRow::default(); 32];
         let n = decode_matrix(&p, &t, &mut rows);
@@ -585,13 +654,19 @@ mod tests {
         let mut vp = p.clone();
         let mut lp = [0.0f32; 3];
         apply_voice(&mut vp, &rows[..n], &sv, 0, &mut lp);
-        assert_eq!(vp.values[lfo_rate], p.values[lfo_rate], "voice pass touched a global dest");
+        assert_eq!(
+            vp.values[lfo_rate], p.values[lfo_rate],
+            "voice pass touched a global dest"
+        );
         assert!((vp.values[shape] - (p.values[shape] + 0.4)).abs() < 1e-6);
 
         let mut gp = p.clone();
         apply_global(&mut gp, &rows[..n], &sv);
         assert!((gp.values[lfo_rate] - (p.values[lfo_rate] + 0.5)).abs() < 1e-6);
-        assert_eq!(gp.values[shape], p.values[shape], "global pass touched a voice dest");
+        assert_eq!(
+            gp.values[shape], p.values[shape],
+            "global pass touched a voice dest"
+        );
     }
 
     #[test]
@@ -618,19 +693,34 @@ mod tests {
         let nans = vec![f32::NAN; 4800];
         let zeros = vec![0.0f32; 4800];
         env.feed(&nans, &nans, 48_000.0);
-        assert!(env.value().is_finite(), "follower stuck non-finite after NaN");
-        assert!(env.value() < 0.01, "NaN leaked into the follower value: {}", env.value());
+        assert!(
+            env.value().is_finite(),
+            "follower stuck non-finite after NaN"
+        );
+        assert!(
+            env.value() < 0.01,
+            "NaN leaked into the follower value: {}",
+            env.value()
+        );
         let ones = vec![1.0f32; 4800];
         env.feed(&ones, &zeros, 48_000.0);
-        assert!(env.value() > 0.9, "follower did not recover after NaN: {}", env.value());
+        assert!(
+            env.value() > 0.9,
+            "follower did not recover after NaN: {}",
+            env.value()
+        );
     }
 
     #[test]
     fn global_mod_ticks_deterministically() {
         let (t, p) = setup();
         let curves: [Curve; 6] = [
-            Curve::sine(), Curve::sine(), Curve::sine(),
-            Curve::sine(), Curve::sine(), Curve::sine(),
+            Curve::sine(),
+            Curve::sine(),
+            Curve::sine(),
+            Curve::sine(),
+            Curve::sine(),
+            Curve::sine(),
         ];
         let mut a = GlobalMod::new(9);
         let mut b = GlobalMod::new(9);
@@ -641,7 +731,11 @@ mod tests {
         assert_eq!(a.last_lfo, b.last_lfo);
         assert_eq!(a.last_drift, b.last_drift);
         // LFO 1 at 1 Hz after a quarter cycle of sine: near the +1 peak.
-        assert!(a.last_lfo[0].0.abs() > 0.5, "lfo barely moved: {:?}", a.last_lfo[0]);
+        assert!(
+            a.last_lfo[0].0.abs() > 0.5,
+            "lfo barely moved: {:?}",
+            a.last_lfo[0]
+        );
         let mut sv = SourceValues::zero();
         a.fill_sources(&mut sv);
         let i = source_to_index(ModSource::Const(200)) as usize;

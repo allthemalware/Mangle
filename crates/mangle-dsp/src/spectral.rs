@@ -124,7 +124,9 @@ impl Channel {
     fn prime(&mut self, st: &mut Scratch, norm: f32, cx: &ChanCtx) {
         if let Some((wstart, wlen)) = cx.win {
             for _ in 0..TAIL_FRAMES - 1 {
-                generate(self, st, norm, cx.data, wstart, wlen, cx.p, cx.ha, cx.r, cx.gain, cx.blur);
+                generate(
+                    self, st, norm, cx.data, wstart, wlen, cx.p, cx.ha, cx.r, cx.gain, cx.blur,
+                );
             }
             self.pending_head = HOP; // discard the ramp; next gen pops steady output
         }
@@ -162,7 +164,9 @@ impl Channel {
     fn next_sample(&mut self, st: &mut Scratch, norm: f32, cx: &ChanCtx) -> f32 {
         if self.pending_head >= HOP {
             if let Some((wstart, wlen)) = cx.win {
-                generate(self, st, norm, cx.data, wstart, wlen, cx.p, cx.ha, cx.r, cx.gain, cx.blur);
+                generate(
+                    self, st, norm, cx.data, wstart, wlen, cx.p, cx.ha, cx.r, cx.gain, cx.blur,
+                );
             } else if self.draining_frames > 0 {
                 self.drain();
             } else {
@@ -352,7 +356,10 @@ impl SpectralState {
         block: usize,
     ) {
         let SpectralState { ch, scratch, norm } = self;
-        let cx = [ChanCtx::resolve(&p[0], bank, 0), ChanCtx::resolve(&p[1], bank, 1)];
+        let cx = [
+            ChanCtx::resolve(&p[0], bank, 0),
+            ChanCtx::resolve(&p[1], bank, 1),
+        ];
 
         // Fast path: a mono source with matching per-channel params (and gate)
         // means the two vocoders would be identical, so run one and feed both
@@ -478,8 +485,8 @@ fn generate(
             st.im[FRAME - k] = 0.0;
         }
         fft.transform(&mut st.re, &mut st.im, true); // → FRAME · real cepstrum
-        // Lifter: keep low quefrency (smooth envelope), drop the fine harmonic
-        // structure. Symmetric, so the envelope stays real.
+                                                     // Lifter: keep low quefrency (smooth envelope), drop the fine harmonic
+                                                     // structure. Symmetric, so the envelope stays real.
         const Q: usize = 48;
         for n in (Q + 1)..(FRAME - Q) {
             st.re[n] = 0.0;
@@ -654,7 +661,11 @@ mod tests {
     #[test]
     fn norm_matches_w_squared_overlap() {
         let st = SpectralState::new();
-        assert!(st.norm > 0.5 && st.norm < 2.5, "unexpected OLA norm {}", st.norm);
+        assert!(
+            st.norm > 0.5 && st.norm < 2.5,
+            "unexpected OLA norm {}",
+            st.norm
+        );
     }
 
     #[test]
@@ -675,7 +686,10 @@ mod tests {
         // Bins lock to their nearest peak with the analysis phase offset.
         for (j, peak, base) in [(8usize, 10usize, peak10), (32usize, 30usize, peak30)] {
             let expect = princarg(base + ana[j] - ana[peak]);
-            assert!(princarg(sum[j] - expect).abs() < 1e-5, "bin {j} not locked to {peak}");
+            assert!(
+                princarg(sum[j] - expect).abs() < 1e-5,
+                "bin {j} not locked to {peak}"
+            );
         }
     }
 }

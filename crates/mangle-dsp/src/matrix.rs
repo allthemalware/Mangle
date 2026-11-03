@@ -244,13 +244,26 @@ mod tests {
     #[test]
     fn dest_owner_examples() {
         assert_eq!(dest_owner(dest_from_index(1)), Owner::Lfo(0));
-        assert_eq!(dest_owner(ModDest::Grain(2, GrainDest::Skew)), Owner::Grain(2));
-        assert_eq!(dest_owner(ModDest::LoopLfo(1, LfoDest::Rate)), Owner::LoopLfo(1));
+        assert_eq!(
+            dest_owner(ModDest::Grain(2, GrainDest::Skew)),
+            Owner::Grain(2)
+        );
+        assert_eq!(
+            dest_owner(ModDest::LoopLfo(1, LfoDest::Rate)),
+            Owner::LoopLfo(1)
+        );
     }
 
     #[test]
     fn slot_eval_scales() {
-        let slot = MatrixSlot { source: 1, amt1: 50.0, dest1: 1, amt2: -100.0, dest2: 2, scale: 0 };
+        let slot = MatrixSlot {
+            source: 1,
+            amt1: 50.0,
+            dest1: 1,
+            amt2: -100.0,
+            dest2: 2,
+            scale: 0,
+        };
         let (a, b) = slot.eval(1.0, 1.0);
         assert!((a - 0.5).abs() < 1e-6);
         assert!((b + 1.0).abs() < 1e-6);

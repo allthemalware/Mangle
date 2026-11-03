@@ -18,7 +18,10 @@ pub struct Fft {
 
 impl Fft {
     pub fn new(n: usize) -> Self {
-        assert!(n.is_power_of_two() && n >= 2, "FFT length must be a power of two ≥ 2");
+        assert!(
+            n.is_power_of_two() && n >= 2,
+            "FFT length must be a power of two ≥ 2"
+        );
         let bits = n.trailing_zeros();
         let rev = (0..n).map(|i| bit_reverse(i, bits)).collect();
         let mut cos = vec![0.0f32; n / 2];
@@ -132,11 +135,19 @@ mod tests {
             .collect();
         let mut im = vec![0.0f32; n];
         f.transform(&mut re, &mut im, false);
-        let mag: Vec<f32> = (0..n).map(|k| (re[k] * re[k] + im[k] * im[k]).sqrt()).collect();
+        let mag: Vec<f32> = (0..n)
+            .map(|k| (re[k] * re[k] + im[k] * im[k]).sqrt())
+            .collect();
         // Dominant bin in 1..n/2 must be `freq`, magnitude ≈ n/2.
-        let peak = (1..n / 2).max_by(|a, b| mag[*a].partial_cmp(&mag[*b]).unwrap()).unwrap();
+        let peak = (1..n / 2)
+            .max_by(|a, b| mag[*a].partial_cmp(&mag[*b]).unwrap())
+            .unwrap();
         assert_eq!(peak, freq, "peak at bin {peak}, expected {freq}");
-        assert!((mag[freq] - n as f32 / 2.0).abs() < 1.0, "peak magnitude {}", mag[freq]);
+        assert!(
+            (mag[freq] - n as f32 / 2.0).abs() < 1.0,
+            "peak magnitude {}",
+            mag[freq]
+        );
     }
 
     #[test]
@@ -155,8 +166,16 @@ mod tests {
                 dr += xt as f64 * a.cos();
                 di += xt as f64 * a.sin();
             }
-            assert!((re[k] as f64 - dr).abs() < 1e-2, "bin {k} re {} vs {dr}", re[k]);
-            assert!((im[k] as f64 - di).abs() < 1e-2, "bin {k} im {} vs {di}", im[k]);
+            assert!(
+                (re[k] as f64 - dr).abs() < 1e-2,
+                "bin {k} re {} vs {dr}",
+                re[k]
+            );
+            assert!(
+                (im[k] as f64 - di).abs() < 1e-2,
+                "bin {k} im {} vs {di}",
+                im[k]
+            );
         }
     }
 }

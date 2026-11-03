@@ -107,7 +107,11 @@ pub fn resample_channel(src: &[f32], src_rate: f64, dst_rate: f64) -> Vec<f32> {
             wsum += h;
             k += 1;
         }
-        out.push(if wsum.abs() > 1e-12 { (acc / wsum) as f32 } else { 0.0 });
+        out.push(if wsum.abs() > 1e-12 {
+            (acc / wsum) as f32
+        } else {
+            0.0
+        });
     }
     out
 }
@@ -165,7 +169,10 @@ fn load_sample_with_cap(
             mss,
             // enable_gapless trims encoder delay/padding (e.g. mp3's ~1105
             // leading samples) so it doesn't sit inside the default loop window.
-            &FormatOptions { enable_gapless: true, ..Default::default() },
+            &FormatOptions {
+                enable_gapless: true,
+                ..Default::default()
+            },
             &MetadataOptions::default(),
         )
         .map_err(|e| LoadError::Decode(e.to_string()))?;
@@ -180,7 +187,8 @@ fn load_sample_with_cap(
     let src_rate = track
         .codec_params
         .sample_rate
-        .ok_or_else(|| LoadError::Decode("missing sample rate".to_string()))? as f64;
+        .ok_or_else(|| LoadError::Decode("missing sample rate".to_string()))?
+        as f64;
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| LoadError::Decode(e.to_string()))?;
@@ -194,11 +202,7 @@ fn load_sample_with_cap(
     loop {
         let packet = match format.next_packet() {
             Ok(p) => p,
-            Err(SymError::IoError(ref e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break
-            }
+            Err(SymError::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(SymError::ResetRequired) => break,
             Err(e) => return Err(LoadError::Decode(e.to_string())),
         };
@@ -208,11 +212,7 @@ fn load_sample_with_cap(
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
             Err(SymError::DecodeError(_)) => continue, // skip a corrupt packet
-            Err(SymError::IoError(ref e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break
-            }
+            Err(SymError::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(LoadError::Decode(e.to_string())),
         };
         if sample_buf.is_none() {
@@ -248,7 +248,11 @@ fn load_sample_with_cap(
     }
 
     let l_src = std::mem::take(&mut chans[0]);
-    let r_src = if n_ch >= 2 { std::mem::take(&mut chans[1]) } else { l_src.clone() };
+    let r_src = if n_ch >= 2 {
+        std::mem::take(&mut chans[1])
+    } else {
+        l_src.clone()
+    };
 
     let l = resample_channel(&l_src, src_rate, target_rate as f64);
     let r = resample_channel(&r_src, src_rate, target_rate as f64);
@@ -301,11 +305,19 @@ pub fn fill_from(
             Ok(loaded) => {
                 let hash = loaded.content_hash;
                 bank.slots[slot] = Some(loaded.slot);
-                out.push(FillResult { slot_index: slot, path: p.clone(), result: Ok(hash) });
+                out.push(FillResult {
+                    slot_index: slot,
+                    path: p.clone(),
+                    result: Ok(hash),
+                });
                 slot += 1;
             }
             Err(e) => {
-                out.push(FillResult { slot_index: slot, path: p.clone(), result: Err(e) });
+                out.push(FillResult {
+                    slot_index: slot,
+                    path: p.clone(),
+                    result: Err(e),
+                });
             }
         }
     }
@@ -376,14 +388,17 @@ mod tests {
         let src = sine(1_000.0, 44_100.0, 1.0, 0.5);
         let out = resample_channel(&src, 44_100.0, 48_000.0);
         let expect = (src.len() as f64 * 48_000.0 / 44_100.0) as usize;
-        assert!((out.len() as i64 - expect as i64).abs() <= 2, "len {}", out.len());
+        assert!(
+            (out.len() as i64 - expect as i64).abs() <= 2,
+            "len {}",
+            out.len()
+        );
         let mut sig = 0.0f64;
         let mut err = 0.0f64;
-        for i in 200..out.len() - 200 {
-            let truth =
-                0.5 * (std::f64::consts::TAU * 1_000.0 * i as f64 / 48_000.0).sin();
+        for (i, &o) in out.iter().enumerate().take(out.len() - 200).skip(200) {
+            let truth = 0.5 * (std::f64::consts::TAU * 1_000.0 * i as f64 / 48_000.0).sin();
             sig += truth * truth;
-            err += (out[i] as f64 - truth) * (out[i] as f64 - truth);
+            err += (o as f64 - truth) * (o as f64 - truth);
         }
         let snr = 10.0 * (sig / err.max(1e-30)).log10();
         assert!(snr > 55.0, "upsample SNR only {snr:.1} dB");
@@ -402,7 +417,10 @@ mod tests {
         let out = resample_channel(&ok, 96_000.0, 48_000.0);
         let r = rms(&out[200..out.len() - 200]);
         let target = 0.5 / 2.0f32.sqrt();
-        assert!((r - target).abs() < target * 0.05, "passband rms {r} vs {target}");
+        assert!(
+            (r - target).abs() < target * 0.05,
+            "passband rms {r} vs {target}"
+        );
     }
 
     // ------------------------------------------------------- file path ---

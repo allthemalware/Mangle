@@ -107,8 +107,7 @@ pub enum PitchQuant {
     MinorPenta,
 }
 
-pub const QUANT_NAMES: [&str; 8] =
-    ["Off", "Chrom", "Oct", "5th", "Maj", "Min", "Pent", "mPent"];
+pub const QUANT_NAMES: [&str; 8] = ["Off", "Chrom", "Oct", "5th", "Maj", "Min", "Pent", "mPent"];
 
 impl PitchQuant {
     pub fn from_index(i: usize) -> Self {
@@ -355,7 +354,7 @@ impl Lane {
                 break;
             }
             let len = match bank.slots[g.snap.slot].as_ref() {
-                Some(s) if s.len() > 0 => s.len(),
+                Some(s) if !s.is_empty() => s.len(),
                 _ => continue, // slot vanished/swapped: grain dies next block
             };
             out[n] = GrainView {
@@ -391,14 +390,12 @@ impl Lane {
         let (slot_idx, wstart, wlen) = resolve_window(p, bank)?;
         let len = bank.slots[slot_idx].as_ref()?.len().max(1) as f64;
         let mut cur = [0.0f32; 2];
-        for ch in 0..2usize {
+        for (ch, cur_ch) in cur.iter_mut().enumerate() {
             let frac = match p.mode {
                 GrainMode::Granular | GrainMode::Cloud => {
                     (scan_offset(p, scan, ch as u8) + p.position).rem_euclid(1.0) as f64
                 }
-                GrainMode::Stretch => {
-                    (self.playheads[ch] + p.position as f64).rem_euclid(1.0)
-                }
+                GrainMode::Stretch => (self.playheads[ch] + p.position as f64).rem_euclid(1.0),
                 GrainMode::Spectral => {
                     // Mirror the vocoder's read start: playhead + Position
                     // offset, wrapped to the window (spectral generate()).
@@ -407,7 +404,7 @@ impl Lane {
                         / wlen.max(1) as f64
                 }
             };
-            cur[ch] = ((wstart as f64 + frac * wlen as f64) / len).clamp(0.0, 1.0) as f32;
+            *cur_ch = ((wstart as f64 + frac * wlen as f64) / len).clamp(0.0, 1.0) as f32;
         }
         Some((cur, slot_idx as u8))
     }
@@ -453,7 +450,13 @@ impl Lane {
 
     /// Render (and advance) the steal fade-out tail. Runs before the main path
     /// so it plays out and clears regardless of the new note's mode.
-    fn render_fading(&mut self, bank: &SampleBank, out_l: &mut [f32], out_r: &mut [f32], block: usize) {
+    fn render_fading(
+        &mut self,
+        bank: &SampleBank,
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        block: usize,
+    ) {
         if self.fading.is_empty() {
             self.fade_age = 0;
             return;
@@ -569,13 +572,22 @@ impl Lane {
         //    closure — it holds &mut rng and &mut emitter).
         self.scratch.clear();
         {
-            let Lane { emitters, scratch, rng, .. } = self;
+            let Lane {
+                emitters,
+                scratch,
+                rng,
+                ..
+            } = self;
             for (ch, emitter) in emitters.iter_mut().enumerate() {
                 let pc = &p[ch];
                 if pc.gate && pc.rate_hz > 0.0 {
                     // Cloud mode reinterprets Jitter as position spray (applied
                     // at spawn), so its emission clock stays regular.
-                    let timing_jitter = if pc.mode == GrainMode::Cloud { 0.0 } else { pc.jitter };
+                    let timing_jitter = if pc.mode == GrainMode::Cloud {
+                        0.0
+                    } else {
+                        pc.jitter
+                    };
                     emitter.advance(block, pc.rate_hz, timing_jitter, sample_rate, rng, |off| {
                         scratch.push((ch as u8, off));
                     });
@@ -616,9 +628,8 @@ impl Lane {
             while n < block && g.age < g.snap.length {
                 let t = g.age as f32 / g.snap.length as f32;
                 let env = grain_envelope_at(t, peak, exponent);
-                let s = read(data, g.pos, g.snap.wstart, g.snap.wlen, g.snap.algo)
-                    * env
-                    * g.snap.level;
+                let s =
+                    read(data, g.pos, g.snap.wstart, g.snap.wlen, g.snap.algo) * env * g.snap.level;
                 if g.snap.channel == 0 {
                     out_l[n] += s * own_gain;
                     out_r[n] += s * swap_gain;
@@ -670,7 +681,11 @@ impl Lane {
         let dir = p.direction.clamp(-1.0, 1.0) as f64;
         // Pos>Pitch (tape/vinyl drag): grain read speed follows the scan-position
         // velocity instead of Direction; Pitch still transposes via pitch_ratio.
-        let speed = if p.pos_pitch { self.pos_vel[channel as usize] } else { dir };
+        let speed = if p.pos_pitch {
+            self.pos_vel[channel as usize]
+        } else {
+            dir
+        };
 
         // Per-mode read start (absolute samples) and per-output-sample increment.
         let (start, increment) = match p.mode {
@@ -679,7 +694,10 @@ impl Lane {
             GrainMode::Granular | GrainMode::Spectral => {
                 // Loop-LFO scan (when looping) + Position; speed = Direction × pitch.
                 let frac = (scan_offset(p, scan, channel) + p.position).rem_euclid(1.0);
-                (wstart as f64 + frac as f64 * wlen as f64, speed * pitch_ratio)
+                (
+                    wstart as f64 + frac as f64 * wlen as f64,
+                    speed * pitch_ratio,
+                )
             }
             GrainMode::Stretch => {
                 // Playhead (normalized window phase) sampled at this emission's
@@ -694,7 +712,10 @@ impl Lane {
                 // a smear; the Loop-LFO scan still offsets the spray centre.
                 let spray = self.rng.bipolar() * p.jitter.clamp(0.0, 1.0);
                 let frac = (scan_offset(p, scan, channel) + p.position + spray).rem_euclid(1.0);
-                (wstart as f64 + frac as f64 * wlen as f64, speed * pitch_ratio)
+                (
+                    wstart as f64 + frac as f64 * wlen as f64,
+                    speed * pitch_ratio,
+                )
             }
         };
 
@@ -721,7 +742,12 @@ impl Lane {
             skew: p.skew,
             channel,
         };
-        let grain = ActiveGrain { snap, pos: start, age: 0, delay: offset as u32 };
+        let grain = ActiveGrain {
+            snap,
+            pos: start,
+            age: 0,
+            delay: offset as u32,
+        };
         self.spawned = self.spawned.saturating_add(1);
 
         if self.grains.len() < MAX_GRAINS {
@@ -769,15 +795,14 @@ mod tests {
         let sr = 48_000.0;
         let mut bank = SampleBank::new();
         bank.slots[0] = Some(SampleSlot::constant(1.0, 96_000, sr));
-        let p = LaneParams { loop_on: false, ..Default::default() };
+        let p = LaneParams {
+            loop_on: false,
+            ..Default::default()
+        };
         let (l, r) = run_lane(&p, &bank, 1.0, sr);
         // Skip warm-up (first grain pair), then demand flatness.
         for n in 14_400..48_000 {
-            assert!(
-                (l[n] - 1.0).abs() < 1e-3,
-                "L not gapless at {n}: {}",
-                l[n]
-            );
+            assert!((l[n] - 1.0).abs() < 1e-3, "L not gapless at {n}: {}", l[n]);
             assert!((r[n] - 1.0).abs() < 1e-3, "R not gapless at {n}: {}", r[n]);
         }
     }
@@ -812,7 +837,10 @@ mod tests {
         let sr = 48_000.0;
         let mut bank = SampleBank::new();
         bank.slots[0] = Some(SampleSlot::constant(1.0, 96_000, sr));
-        let p = LaneParams { loop_on: false, ..Default::default() };
+        let p = LaneParams {
+            loop_on: false,
+            ..Default::default()
+        };
         let pp = [p, p];
         let mut lane = Lane::new(0xBADC0DE);
         let mut l = vec![0.0f32; 512];
@@ -838,15 +866,41 @@ mod tests {
         let sr = 48_000.0;
         let mut bank = SampleBank::new();
         bank.slots[0] = Some(SampleSlot::test_tone(sr));
-        let base = LaneParams { pitch_st: 5.3, jitter: 0.0, loop_on: false, ..Default::default() };
-        let near = run_lane(&LaneParams { algo: Algo::Nearest, ..base }, &bank, 0.5, sr).0;
-        let sinc = run_lane(&LaneParams { algo: Algo::Sinc, ..base }, &bank, 0.5, sr).0;
+        let base = LaneParams {
+            pitch_st: 5.3,
+            jitter: 0.0,
+            loop_on: false,
+            ..Default::default()
+        };
+        let near = run_lane(
+            &LaneParams {
+                algo: Algo::Nearest,
+                ..base
+            },
+            &bank,
+            0.5,
+            sr,
+        )
+        .0;
+        let sinc = run_lane(
+            &LaneParams {
+                algo: Algo::Sinc,
+                ..base
+            },
+            &bank,
+            0.5,
+            sr,
+        )
+        .0;
         let diff: f64 = near
             .iter()
             .zip(sinc.iter())
             .map(|(a, b)| (a - b).abs() as f64)
             .sum();
-        assert!(diff > 1.0, "Nearest and Sinc-8 outputs identical (diff {diff})");
+        assert!(
+            diff > 1.0,
+            "Nearest and Sinc-8 outputs identical (diff {diff})"
+        );
     }
 
     #[test]
@@ -864,11 +918,18 @@ mod tests {
             mono: false,
         };
         bank.slots[0] = Some(slot);
-        let p = LaneParams { pan: 1.0, loop_on: false, ..Default::default() };
+        let p = LaneParams {
+            pan: 1.0,
+            loop_on: false,
+            ..Default::default()
+        };
         let (l, r) = run_lane(&p, &bank, 0.5, sr);
         let e_l: f64 = l.iter().map(|v| (v * v) as f64).sum();
         let e_r: f64 = r.iter().map(|v| (v * v) as f64).sum();
-        assert!(e_r > 10.0 * e_l.max(1e-12), "pan swap failed: L {e_l}, R {e_r}");
+        assert!(
+            e_r > 10.0 * e_l.max(1e-12),
+            "pan swap failed: L {e_l}, R {e_r}"
+        );
     }
 
     #[test]
@@ -878,7 +939,12 @@ mod tests {
         bank.slots[0] = Some(SampleSlot::test_tone(sr));
         // Absurd density: 500 Hz × 2 channels × 1000 ms free-running grains
         // → ~1000 nominal concurrent, must clamp at the pool cap.
-        let p = LaneParams { rate_hz: 500.0, linked: false, length_val: 1000.0, ..Default::default() };
+        let p = LaneParams {
+            rate_hz: 500.0,
+            linked: false,
+            length_val: 1000.0,
+            ..Default::default()
+        };
         let pp = [p, p];
         let mut lane = Lane::new(7);
         let mut l = vec![0.0f32; 512];
@@ -902,8 +968,17 @@ mod tests {
         bank.slots[0] = Some(SampleSlot::test_tone(sr));
         // L emits, R is rate-gated off — only the left stream may sound
         // (pan 0 keeps each grain on its own channel).
-        let base = LaneParams { loop_on: false, ..Default::default() };
-        let p = [base, LaneParams { rate_hz: 0.0, ..base }];
+        let base = LaneParams {
+            loop_on: false,
+            ..Default::default()
+        };
+        let p = [
+            base,
+            LaneParams {
+                rate_hz: 0.0,
+                ..base
+            },
+        ];
         let mut lane = Lane::new(3);
         let total = 24_000usize;
         let mut l = vec![0.0f32; total];
@@ -911,7 +986,15 @@ mod tests {
         let mut done = 0;
         while done < total {
             let block = (total - done).min(512);
-            lane.process(&p, &bank, (0.0, 0.0), sr, &mut l[done..done + block], &mut r[done..done + block], block);
+            lane.process(
+                &p,
+                &bank,
+                (0.0, 0.0),
+                sr,
+                &mut l[done..done + block],
+                &mut r[done..done + block],
+                block,
+            );
             done += block;
         }
         let e = |v: &Vec<f32>| v.iter().map(|x| (x * x) as f64).sum::<f64>();
@@ -983,8 +1066,8 @@ mod tests {
             direction: 0.0,
             position: 0.25, // ramp value here is exactly -0.5
             loop_on: false,
-            shape: 1.0,      // rect-ish window: output ≈ raw read
-            rate_hz: 2.0,    // sparse, non-overlapping grains
+            shape: 1.0,   // rect-ish window: output ≈ raw read
+            rate_hz: 2.0, // sparse, non-overlapping grains
             linked: false,
             length_val: 100.0,
             ..Default::default()
@@ -1003,7 +1086,10 @@ mod tests {
     fn ramp_bank(n: usize, sr: f32) -> SampleBank {
         let mut bank = SampleBank::new();
         bank.slots[0] = Some(SampleSlot {
-            data: [(0..n).map(|i| (i as f32 / n as f32) * 2.0 - 1.0).collect(), vec![0.0; n]],
+            data: [
+                (0..n).map(|i| (i as f32 / n as f32) * 2.0 - 1.0).collect(),
+                vec![0.0; n],
+            ],
             sample_rate: sr,
             root_note: 60,
             loop_start: 0,
@@ -1019,13 +1105,47 @@ mod tests {
         let sr = 48_000.0;
         let mut bank = SampleBank::new();
         bank.slots[0] = Some(SampleSlot::test_tone(sr));
-        let base = LaneParams { rate_hz: 30.0, loop_on: false, ..Default::default() };
-        let gran = run_lane(&LaneParams { mode: GrainMode::Granular, ..base }, &bank, 0.5, sr).0;
-        let stretch = run_lane(&LaneParams { mode: GrainMode::Stretch, ..base }, &bank, 0.5, sr).0;
-        let cloud =
-            run_lane(&LaneParams { mode: GrainMode::Cloud, jitter: 0.8, ..base }, &bank, 0.5, sr).0;
+        let base = LaneParams {
+            rate_hz: 30.0,
+            loop_on: false,
+            ..Default::default()
+        };
+        let gran = run_lane(
+            &LaneParams {
+                mode: GrainMode::Granular,
+                ..base
+            },
+            &bank,
+            0.5,
+            sr,
+        )
+        .0;
+        let stretch = run_lane(
+            &LaneParams {
+                mode: GrainMode::Stretch,
+                ..base
+            },
+            &bank,
+            0.5,
+            sr,
+        )
+        .0;
+        let cloud = run_lane(
+            &LaneParams {
+                mode: GrainMode::Cloud,
+                jitter: 0.8,
+                ..base
+            },
+            &bank,
+            0.5,
+            sr,
+        )
+        .0;
         let diff = |a: &[f32], b: &[f32]| {
-            a.iter().zip(b).map(|(x, y)| (x - y).abs() as f64).sum::<f64>()
+            a.iter()
+                .zip(b)
+                .map(|(x, y)| (x - y).abs() as f64)
+                .sum::<f64>()
         };
         assert!(diff(&gran, &stretch) > 1.0, "Granular vs Stretch identical");
         assert!(diff(&gran, &cloud) > 1.0, "Granular vs Cloud identical");
@@ -1050,25 +1170,34 @@ mod tests {
             ..Default::default()
         };
         let (l, _) = run_lane(&p, &bank, 0.5, sr);
-        let span = l.iter().cloned().fold(f32::MIN, f32::max)
-            - l.iter().cloned().fold(f32::MAX, f32::min);
-        assert!(span > 0.1, "Stretch grain did not read forward: span {span}");
+        let span =
+            l.iter().cloned().fold(f32::MIN, f32::max) - l.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(
+            span > 0.1,
+            "Stretch grain did not read forward: span {span}"
+        );
 
         // Granular in the same setup freezes on one sample (≈ flat output).
-        let pg = LaneParams { mode: GrainMode::Granular, ..p };
+        let pg = LaneParams {
+            mode: GrainMode::Granular,
+            ..p
+        };
         let (lg, _) = run_lane(&pg, &bank, 0.5, sr);
         let gvals: Vec<f32> = lg.iter().copied().filter(|v| v.abs() > 0.01).collect();
         let gspan = gvals.iter().cloned().fold(f32::MIN, f32::max)
             - gvals.iter().cloned().fold(f32::MAX, f32::min);
-        assert!(gspan < 0.05, "Granular freeze should sit on one value: span {gspan}");
+        assert!(
+            gspan < 0.05,
+            "Granular freeze should sit on one value: span {gspan}"
+        );
     }
 
     #[test]
     fn stretch_playhead_advances_through_sample() {
         let sr = 48_000.0;
         let bank = ramp_bank(96_000, sr); // 2 s ramp
-        // Direction 1 (1× scrub), pitch 0: the playhead sweeps the window, so
-        // the read position (ramp value) climbs over time.
+                                          // Direction 1 (1× scrub), pitch 0: the playhead sweeps the window, so
+                                          // the read position (ramp value) climbs over time.
         let p = LaneParams {
             mode: GrainMode::Stretch,
             direction: 1.0,
@@ -1086,7 +1215,10 @@ mod tests {
         let mean = |s: &[f32]| s.iter().sum::<f32>() / s.len() as f32;
         let m1 = mean(&l[1000..half]); // skip warm-up
         let m2 = mean(&l[half..]);
-        assert!(m2 > m1 + 0.2, "Stretch playhead did not advance: {m1} -> {m2}");
+        assert!(
+            m2 > m1 + 0.2,
+            "Stretch playhead did not advance: {m1} -> {m2}"
+        );
     }
 
     #[test]
@@ -1110,8 +1242,26 @@ mod tests {
         let span = |s: &[f32]| {
             s.iter().cloned().fold(f32::MIN, f32::max) - s.iter().cloned().fold(f32::MAX, f32::min)
         };
-        let narrow = run_lane(&LaneParams { jitter: 0.0, ..base }, &bank, 0.5, sr).0;
-        let wide = run_lane(&LaneParams { jitter: 1.0, ..base }, &bank, 0.5, sr).0;
+        let narrow = run_lane(
+            &LaneParams {
+                jitter: 0.0,
+                ..base
+            },
+            &bank,
+            0.5,
+            sr,
+        )
+        .0;
+        let wide = run_lane(
+            &LaneParams {
+                jitter: 1.0,
+                ..base
+            },
+            &bank,
+            0.5,
+            sr,
+        )
+        .0;
         assert!(
             span(&wide) > span(&narrow) + 0.5,
             "Cloud spray did not widen the read distribution: narrow {} wide {}",
@@ -1123,8 +1273,9 @@ mod tests {
     // ---- Spectral (phase vocoder) integration ----
 
     fn sine_bank(freq: f32, n: usize, sr: f32) -> SampleBank {
-        let data: Vec<f32> =
-            (0..n).map(|i| (core::f32::consts::TAU * freq * i as f32 / sr).sin()).collect();
+        let data: Vec<f32> = (0..n)
+            .map(|i| (core::f32::consts::TAU * freq * i as f32 / sr).sin())
+            .collect();
         let mut bank = SampleBank::new();
         bank.slots[0] = Some(SampleSlot {
             data: [data.clone(), data],
@@ -1146,9 +1297,7 @@ mod tests {
         let start = sig.len().saturating_sub(N);
         let mut re = vec![0.0f32; N];
         let mut im = vec![0.0f32; N];
-        for i in 0..N {
-            re[i] = sig[start + i];
-        }
+        re.copy_from_slice(&sig[start..start + N]);
         f.transform(&mut re, &mut im, false);
         let mut peak = 1usize;
         let mut best = 0.0f32;
@@ -1182,9 +1331,16 @@ mod tests {
         for v in &l {
             assert!(v.is_finite());
         }
-        assert!(rms(&l) > 0.05, "spectral passthrough too quiet: rms {}", rms(&l));
+        assert!(
+            rms(&l) > 0.05,
+            "spectral passthrough too quiet: rms {}",
+            rms(&l)
+        );
         let f = dominant_freq(&l, sr);
-        assert!((f - freq).abs() < 60.0, "spectral passthrough freq {f}, expected {freq}");
+        assert!(
+            (f - freq).abs() < 60.0,
+            "spectral passthrough freq {f}, expected {freq}"
+        );
     }
 
     #[test]
@@ -1205,9 +1361,16 @@ mod tests {
             assert!(v.is_finite());
         }
         let tail = &l[(sr as usize) * 3 / 4..]; // last 0.25 s
-        assert!(rms(tail) > 0.05, "spectral freeze did not sustain: tail rms {}", rms(tail));
+        assert!(
+            rms(tail) > 0.05,
+            "spectral freeze did not sustain: tail rms {}",
+            rms(tail)
+        );
         let f = dominant_freq(&l, sr);
-        assert!((f - freq).abs() < 60.0, "freeze pitch drifted: {f} vs {freq}");
+        assert!(
+            (f - freq).abs() < 60.0,
+            "freeze pitch drifted: {f} vs {freq}"
+        );
     }
 
     #[test]
@@ -1222,11 +1385,20 @@ mod tests {
             loop_on: false,
             ..Default::default()
         };
-        let down = LaneParams { pitch_st: -12.0, ..up }; // −1 octave → ~½ freq
+        let down = LaneParams {
+            pitch_st: -12.0,
+            ..up
+        }; // −1 octave → ~½ freq
         let fu = dominant_freq(&run_lane(&up, &bank, 1.0, sr).0, sr);
         let fd = dominant_freq(&run_lane(&down, &bank, 1.0, sr).0, sr);
-        assert!((fu - 1000.0).abs() < 80.0, "pitch +12 → {fu} Hz, expected ~1000");
-        assert!((fd - 250.0).abs() < 50.0, "pitch −12 → {fd} Hz, expected ~250");
+        assert!(
+            (fu - 1000.0).abs() < 80.0,
+            "pitch +12 → {fu} Hz, expected ~1000"
+        );
+        assert!(
+            (fd - 250.0).abs() < 50.0,
+            "pitch −12 → {fd} Hz, expected ~250"
+        );
     }
 
     #[test]
@@ -1240,7 +1412,10 @@ mod tests {
             loop_on: false,
             ..Default::default()
         };
-        let released = LaneParams { gate: false, ..held };
+        let released = LaneParams {
+            gate: false,
+            ..held
+        };
         let mut l = vec![0.0f32; 512];
         let mut r = vec![0.0f32; 512];
         let mut run = |lane: &mut Lane, p: &LaneParams| {
@@ -1255,13 +1430,19 @@ mod tests {
         }
         assert!(lane.is_ringing(), "should be ringing while gated");
         // Release: the OLA tail still sounds on the next block...
-        assert!(run(&mut lane, &released) > 0.01, "release tail should still sound");
+        assert!(
+            run(&mut lane, &released) > 0.01,
+            "release tail should still sound"
+        );
         // ...then rings out fully (no abrupt cut, eventually silent).
         for _ in 0..10 {
             run(&mut lane, &released);
         }
         assert!(!lane.is_ringing(), "should have rung out after release");
-        assert!(run(&mut lane, &released) < 1e-6, "should be silent after ring-out");
+        assert!(
+            run(&mut lane, &released) < 1e-6,
+            "should be silent after ring-out"
+        );
     }
 
     /// Harmonics of `f0` shaped by a fixed Gaussian formant — the spectral
@@ -1299,9 +1480,7 @@ mod tests {
         let start = sig.len().saturating_sub(N);
         let mut re = vec![0.0f32; N];
         let mut im = vec![0.0f32; N];
-        for i in 0..N {
-            re[i] = sig[start + i];
-        }
+        re.copy_from_slice(&sig[start..start + N]);
         f.transform(&mut re, &mut im, false);
         let (mut num, mut den) = (0.0f64, 0.0f64);
         for k in 1..N / 2 {
@@ -1324,7 +1503,10 @@ mod tests {
             loop_on: false,
             ..Default::default()
         };
-        let preserved = LaneParams { shape: 1.0, ..classic }; // formant-preserving
+        let preserved = LaneParams {
+            shape: 1.0,
+            ..classic
+        }; // formant-preserving
         let c_classic = spectral_centroid(&run_lane(&classic, &bank, 1.0, sr).0, sr);
         let c_preserve = spectral_centroid(&run_lane(&preserved, &bank, 1.0, sr).0, sr);
         // Classic shift drags the spectral centre up with the pitch; preserving
@@ -1341,10 +1523,12 @@ mod tests {
         // left carries 400 Hz, right 900 Hz, and they must not bleed together.
         let sr = 48_000.0;
         let n = 48_000;
-        let dl: Vec<f32> =
-            (0..n).map(|i| (core::f32::consts::TAU * 400.0 * i as f32 / sr).sin()).collect();
-        let dr: Vec<f32> =
-            (0..n).map(|i| (core::f32::consts::TAU * 900.0 * i as f32 / sr).sin()).collect();
+        let dl: Vec<f32> = (0..n)
+            .map(|i| (core::f32::consts::TAU * 400.0 * i as f32 / sr).sin())
+            .collect();
+        let dr: Vec<f32> = (0..n)
+            .map(|i| (core::f32::consts::TAU * 900.0 * i as f32 / sr).sin())
+            .collect();
         let mut bank = SampleBank::new();
         bank.slots[0] = Some(SampleSlot {
             data: [dl, dr],
@@ -1364,8 +1548,14 @@ mod tests {
         let (l, r) = run_lane(&p, &bank, 1.0, sr);
         let fl = dominant_freq(&l, sr);
         let fr = dominant_freq(&r, sr);
-        assert!((fl - 400.0).abs() < 60.0, "left channel freq {fl} Hz, expected ~400");
-        assert!((fr - 900.0).abs() < 60.0, "right channel freq {fr} Hz, expected ~900");
+        assert!(
+            (fl - 400.0).abs() < 60.0,
+            "left channel freq {fl} Hz, expected ~400"
+        );
+        assert!(
+            (fr - 900.0).abs() < 60.0,
+            "right channel freq {fr} Hz, expected ~900"
+        );
     }
 
     #[test]
@@ -1406,7 +1596,10 @@ mod tests {
         let (l, _) = run_lane(&p, &bank, 0.05, sr);
         let early = rms(&l[0..256]); // first hop
         let later = rms(&l[1024..1280]); // steady state
-        assert!(early > 0.5 * later, "onset ramped, not primed: early {early}, later {later}");
+        assert!(
+            early > 0.5 * later,
+            "onset ramped, not primed: early {early}, later {later}"
+        );
     }
 
     #[test]
@@ -1437,7 +1630,15 @@ mod tests {
         let (mut done, mut s) = (0usize, 0.0f32);
         while done < total {
             let n = (total - done).min(block);
-            lane.process(&[p, p], &bank, (s, s), sr, &mut l[done..done + n], &mut r[done..done + n], n);
+            lane.process(
+                &[p, p],
+                &bank,
+                (s, s),
+                sr,
+                &mut l[done..done + n],
+                &mut r[done..done + n],
+                n,
+            );
             s += 4.0 * n as f32 / wlen; // holds scan velocity at 2.0 regardless of n
             done += n;
         }
@@ -1445,7 +1646,10 @@ mod tests {
             assert!(v.is_finite());
         }
         let f = dominant_freq(&l, sr);
-        assert!((f - 2000.0).abs() < 150.0, "Pos>Pitch tape-drag freq {f} Hz, expected ~2000");
+        assert!(
+            (f - 2000.0).abs() < 150.0,
+            "Pos>Pitch tape-drag freq {f} Hz, expected ~2000"
+        );
     }
 
     #[test]
@@ -1479,12 +1683,27 @@ mod tests {
 
         // Render the fade with the gate OFF (no new grains): the tail must sound
         // rather than cutting to instant silence (the click this fix removes).
-        let gate_off = LaneParams { rate_hz: 0.0, gate: false, ..p };
+        let gate_off = LaneParams {
+            rate_hz: 0.0,
+            gate: false,
+            ..p
+        };
         let mut fl = vec![0.0f32; 256];
         let mut fr = vec![0.0f32; 256];
-        lane.process(&[gate_off, gate_off], &bank, (0.0, 0.0), sr, &mut fl, &mut fr, 256);
+        lane.process(
+            &[gate_off, gate_off],
+            &bank,
+            (0.0, 0.0),
+            sr,
+            &mut fl,
+            &mut fr,
+            256,
+        );
         let tail: f64 = fl.iter().chain(fr.iter()).map(|v| (v * v) as f64).sum();
-        assert!(tail > 0.0, "steal produced instant silence (click), not a fade");
+        assert!(
+            tail > 0.0,
+            "steal produced instant silence (click), not a fade"
+        );
         for v in fl.iter().chain(fr.iter()) {
             assert!(v.is_finite());
         }
@@ -1493,7 +1712,15 @@ mod tests {
         for _ in 0..3 {
             fl.iter_mut().for_each(|v| *v = 0.0);
             fr.iter_mut().for_each(|v| *v = 0.0);
-            lane.process(&[gate_off, gate_off], &bank, (0.0, 0.0), sr, &mut fl, &mut fr, 256);
+            lane.process(
+                &[gate_off, gate_off],
+                &bank,
+                (0.0, 0.0),
+                sr,
+                &mut fl,
+                &mut fr,
+                256,
+            );
         }
         assert!(!lane.is_ringing(), "steal tail should have faded out");
     }
@@ -1509,14 +1736,26 @@ mod tests {
         // Major scale: 3 (D#) is off-scale → nearest is 2 (D) or 4 (E); tie → lower.
         assert_eq!(quantize_semitones(3.0, PitchQuant::Major), 2.0);
         assert_eq!(quantize_semitones(5.9, PitchQuant::Major), 5.0); // ~F stays F
-        // Every quantized value must itself be on the scale.
-        for q in [PitchQuant::Fifth, PitchQuant::Major, PitchQuant::Minor, PitchQuant::Penta, PitchQuant::MinorPenta] {
+                                                                     // Every quantized value must itself be on the scale.
+        for q in [
+            PitchQuant::Fifth,
+            PitchQuant::Major,
+            PitchQuant::Minor,
+            PitchQuant::Penta,
+            PitchQuant::MinorPenta,
+        ] {
             for i in -240..=240 {
                 let st = i as f32 / 10.0;
                 let out = quantize_semitones(st, q);
                 let pc = (out.round() as i32).rem_euclid(12);
-                assert!(q.classes().contains(&pc), "{q:?}: {st} -> {out} (pc {pc} off-scale)");
-                assert!((out - st).abs() <= 6.0, "{q:?}: snapped too far {st} -> {out}");
+                assert!(
+                    q.classes().contains(&pc),
+                    "{q:?}: {st} -> {out} (pc {pc} off-scale)"
+                );
+                assert!(
+                    (out - st).abs() <= 6.0,
+                    "{q:?}: snapped too far {st} -> {out}"
+                );
             }
         }
     }
@@ -1532,11 +1771,20 @@ mod tests {
         slot.loop_start = len; // degenerate: start at the very end
         slot.loop_end = len;
         bank.slots[0] = Some(slot);
-        let p = LaneParams { loop_on: false, ..Default::default() };
+        let p = LaneParams {
+            loop_on: false,
+            ..Default::default()
+        };
         let got = resolve_window(&p, &bank);
-        assert!(got.is_some(), "resolve_window returned None for a loaded slot");
+        assert!(
+            got.is_some(),
+            "resolve_window returned None for a loaded slot"
+        );
         let (_, wstart, wlen) = got.unwrap();
-        assert!(wstart + wlen <= len, "window {wstart}+{wlen} exceeds slot len {len}");
+        assert!(
+            wstart + wlen <= len,
+            "window {wstart}+{wlen} exceeds slot len {len}"
+        );
         assert!(wlen >= 1, "window length must be positive");
     }
 
@@ -1547,7 +1795,10 @@ mod tests {
         let sr = 48_000.0;
         let mut bank = SampleBank::new();
         bank.slots[0] = Some(SampleSlot::test_tone(sr));
-        let p = LaneParams { rate_hz: 25.0, ..Default::default() };
+        let p = LaneParams {
+            rate_hz: 25.0,
+            ..Default::default()
+        };
         let pp = [p, p];
         let mut lane = Lane::new(1);
         let (mut l, mut r) = (vec![0.0f32; 4096], vec![0.0f32; 4096]);
@@ -1566,19 +1817,27 @@ mod tests {
             assert_eq!(v.slot, 0);
         }
 
-        for mode in [GrainMode::Granular, GrainMode::Stretch, GrainMode::Cloud, GrainMode::Spectral]
-        {
+        for mode in [
+            GrainMode::Granular,
+            GrainMode::Stretch,
+            GrainMode::Cloud,
+            GrainMode::Spectral,
+        ] {
             let pm = LaneParams { mode, ..p };
             let (cur, slot) = lane
                 .read_cursor(&pm, &bank, (0.25, -0.25))
                 .expect("cursor for a loaded slot");
             assert_eq!(slot, 0);
             for c in cur {
-                assert!((0.0..=1.0).contains(&c), "{mode:?} cursor out of range: {c}");
+                assert!(
+                    (0.0..=1.0).contains(&c),
+                    "{mode:?} cursor out of range: {c}"
+                );
             }
         }
         assert!(
-            lane.read_cursor(&p, &SampleBank::new(), (0.0, 0.0)).is_none(),
+            lane.read_cursor(&p, &SampleBank::new(), (0.0, 0.0))
+                .is_none(),
             "cursor must be None with no slots loaded"
         );
     }

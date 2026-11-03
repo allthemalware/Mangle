@@ -25,9 +25,7 @@ use nih_plug::prelude::*;
 use nih_plug_egui::resizable_window::ResizableWindow;
 use nih_plug_egui::{create_egui_editor, egui};
 
-use egui::{
-    vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui,
-};
+use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 
 use mangle_dsp::curve::Curve;
 use mangle_dsp::engine::GrainMode;
@@ -35,7 +33,7 @@ use mangle_dsp::params::{pid, Module, Patch, GRAIN_MODE_IDX, N_GRAIN_MODES};
 use mangle_dsp::random::{randomize, RandomOptions};
 
 use crate::feed::FeedFrame;
-use crate::{MangleParams, PendingLoad, PSlot};
+use crate::{MangleParams, PSlot, PendingLoad};
 
 // ------------------------------------------------------------ palette ---
 
@@ -80,11 +78,13 @@ fn fill(ui: &Ui, r: Rect, c: Color32) {
 }
 
 fn frame(ui: &Ui, r: Rect, c: Color32) {
-    ui.painter().rect_stroke(r, 0.0, Stroke::new(1.0, c), StrokeKind::Inside);
+    ui.painter()
+        .rect_stroke(r, 0.0, Stroke::new(1.0_f32, c), StrokeKind::Inside);
 }
 
 fn txt(ui: &Ui, pos: Pos2, anchor: Align2, s: &str, size: f32, c: Color32) {
-    ui.painter().text(pos, anchor, s, FontId::monospace(size), c);
+    ui.painter()
+        .text(pos, anchor, s, FontId::monospace(size), c);
 }
 
 // ------------------------------------------------------- param access ---
@@ -166,7 +166,12 @@ impl MangleParams {
             PSlot::I(i) => PRef::I(&self.ints[i]),
             PSlot::B(i) => PRef::B(&self.bools[i]),
         };
-        CellParam { pr, default_norm: info.default_norm, steps: info.map.step_count(), bipolar: info.bipolar }
+        CellParam {
+            pr,
+            default_norm: info.default_norm,
+            steps: info.map.step_count(),
+            bipolar: info.bipolar,
+        }
     }
 }
 
@@ -362,7 +367,13 @@ fn cell(ui: &mut Ui, setter: &ParamSetter, c: &CellParam, label: &str, w: f32) {
         if scroll.abs() > 0.0 {
             let step = match c.steps {
                 Some(s) if s > 1 => 1.0 / (s - 1) as f32,
-                _ => if fine { 0.001 } else { 0.01 },
+                _ => {
+                    if fine {
+                        0.001
+                    } else {
+                        0.01
+                    }
+                }
             };
             c.begin(setter);
             c.set(setter, cur + step * scroll.signum());
@@ -378,19 +389,37 @@ fn cell(ui: &mut Ui, setter: &ParamSetter, c: &CellParam, label: &str, w: f32) {
     if c.bipolar {
         let cx = rect.center().x;
         let dx = (n - 0.5) * rect.width();
-        let (a, b) = if dx >= 0.0 { (cx, cx + dx) } else { (cx + dx, cx) };
-        fill(ui, Rect::from_min_max(Pos2::new(a, bar_y), Pos2::new(b, rect.bottom() - 1.0)), ACCENT);
+        let (a, b) = if dx >= 0.0 {
+            (cx, cx + dx)
+        } else {
+            (cx + dx, cx)
+        };
+        fill(
+            ui,
+            Rect::from_min_max(Pos2::new(a, bar_y), Pos2::new(b, rect.bottom() - 1.0)),
+            ACCENT,
+        );
     } else {
         fill(
             ui,
             Rect::from_min_max(
                 Pos2::new(rect.left() + 1.0, bar_y),
-                Pos2::new(rect.left() + 1.0 + n * (rect.width() - 2.0), rect.bottom() - 1.0),
+                Pos2::new(
+                    rect.left() + 1.0 + n * (rect.width() - 2.0),
+                    rect.bottom() - 1.0,
+                ),
             ),
             ACCENT,
         );
     }
-    txt(ui, Pos2::new(rect.left() + 4.0, rect.center().y), Align2::LEFT_CENTER, label, 10.0, DIM);
+    txt(
+        ui,
+        Pos2::new(rect.left() + 4.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        10.0,
+        DIM,
+    );
     let vcol = if c.is_bool() && n >= 0.5 {
         ACCENT
     } else if hovered || resp.dragged() {
@@ -398,7 +427,14 @@ fn cell(ui: &mut Ui, setter: &ParamSetter, c: &CellParam, label: &str, w: f32) {
     } else {
         TEXT
     };
-    txt(ui, Pos2::new(rect.right() - 4.0, rect.center().y), Align2::RIGHT_CENTER, &c.text(), 10.0, vcol);
+    txt(
+        ui,
+        Pos2::new(rect.right() - 4.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        &c.text(),
+        10.0,
+        vcol,
+    );
 }
 
 /// Terminal button. Returns the response; paints accent when `active`.
@@ -406,7 +442,13 @@ fn tbtn(ui: &mut Ui, label: &str, active: bool, w: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(w, CELL_H), Sense::click());
     fill(ui, rect, if active { ACCENT_FAINT } else { HEADER });
     frame(ui, rect, if active { ACCENT } else { BORDER });
-    let c = if active { ACCENT } else if resp.hovered() { BRIGHT } else { TEXT };
+    let c = if active {
+        ACCENT
+    } else if resp.hovered() {
+        BRIGHT
+    } else {
+        TEXT
+    };
     txt(ui, rect.center(), Align2::CENTER_CENTER, label, 10.0, c);
     resp
 }
@@ -425,8 +467,16 @@ fn lock_btn(ui: &mut Ui, locked: &mut bool, changed: &mut bool) {
 }
 
 fn section_label(ui: &mut Ui, label: &str) {
-    let (rect, _) = ui.allocate_exact_size(vec2(label.len() as f32 * 7.0 + 8.0, CELL_H), Sense::hover());
-    txt(ui, Pos2::new(rect.left() + 2.0, rect.center().y), Align2::LEFT_CENTER, label, 10.0, BRIGHT);
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(label.len() as f32 * 7.0 + 8.0, CELL_H), Sense::hover());
+    txt(
+        ui,
+        Pos2::new(rect.left() + 2.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        10.0,
+        BRIGHT,
+    );
 }
 
 // ------------------------------------------------------- editor state ---
@@ -473,7 +523,10 @@ struct LaneHistory {
 
 impl Default for LaneHistory {
     fn default() -> Self {
-        Self { ring: [LaneBucket::default(); LANE_BUCKETS], head: 0 }
+        Self {
+            ring: [LaneBucket::default(); LANE_BUCKETS],
+            head: 0,
+        }
     }
 }
 
@@ -533,7 +586,11 @@ fn draw_editor(
     // already empty by the time dropped_files arrives.
     let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
     let dropped: Vec<std::path::PathBuf> = ctx.input(|i| {
-        i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect()
+        i.raw
+            .dropped_files
+            .iter()
+            .filter_map(|f| f.path.clone())
+            .collect()
     });
     if !dropped.is_empty() {
         let start = st.drop_target.unwrap_or(st.selected_slot).min(5);
@@ -581,14 +638,16 @@ fn draw_editor(
     egui::TopBottomPanel::top("strip")
         .frame(egui::Frame::new().fill(BG).inner_margin(4.0))
         .show(ctx, |ui| {
-            egui::ScrollArea::horizontal().id_salt("strip-scroll").show(ui, |ui| {
-                ui.set_min_width(MIN_CONTENT_W);
-                waveform_strip(ui, setter, params, st, &mut ex, &mut ex_changed);
-                ui.add_space(GAP);
-                lanes_display(ui, params, st);
-                ui.add_space(GAP);
-                tab_bar(ui, st);
-            });
+            egui::ScrollArea::horizontal()
+                .id_salt("strip-scroll")
+                .show(ui, |ui| {
+                    ui.set_min_width(MIN_CONTENT_W);
+                    waveform_strip(ui, setter, params, st, &mut ex, &mut ex_changed);
+                    ui.add_space(GAP);
+                    lanes_display(ui, params, st);
+                    ui.add_space(GAP);
+                    tab_bar(ui, st);
+                });
         });
 
     // ResizableWindow adds a drag corner that requests a host resize via
@@ -619,7 +678,9 @@ fn draw_editor(
         if let Ok(mut w) = params.extra.write() {
             *w = ex;
         }
-        params.extra_gen.fetch_add(1, std::sync::atomic::Ordering::Release);
+        params
+            .extra_gen
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
     }
 
     // ~30 Hz tick so the realtime displays animate without input events.
@@ -660,77 +721,89 @@ fn header_bar(
         .show(ctx, |ui| {
             // Horizontal scroll so RND/TOOLS/CURVES stay reachable when the
             // window is narrower than the header row.
-            egui::ScrollArea::horizontal().id_salt("hdr-scroll").show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    txt(
-                        ui,
-                        Pos2::new(ui.cursor().left() + 4.0, ui.cursor().top() + CELL_H * 0.5),
-                        Align2::LEFT_CENTER,
-                        "MANGLE",
-                        13.0,
-                        BRIGHT,
-                    );
-                    ui.add_space(70.0);
-                    cell(ui, setter, &params.cp(Module::Global, 0, 0), "ON", 70.0);
-                    cell(ui, setter, &params.cp(Module::Global, 0, 1), "KEY", 92.0);
-                    cell(ui, setter, &params.cp(Module::Global, 0, 2), "STEREO", 96.0);
-                    cell(ui, setter, &params.cp(Module::Global, 0, 3), "SQUEEZE", 92.0);
-                    cell(ui, setter, &params.cp(Module::Global, 0, 4), "LEVEL", 104.0);
-                    cell(ui, setter, &params.cp(Module::Global, 0, 5), "VOICES", 86.0);
-                    ui.add_space(12.0);
+            egui::ScrollArea::horizontal()
+                .id_salt("hdr-scroll")
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        txt(
+                            ui,
+                            Pos2::new(ui.cursor().left() + 4.0, ui.cursor().top() + CELL_H * 0.5),
+                            Align2::LEFT_CENTER,
+                            "MANGLE",
+                            13.0,
+                            BRIGHT,
+                        );
+                        ui.add_space(70.0);
+                        cell(ui, setter, &params.cp(Module::Global, 0, 0), "ON", 70.0);
+                        cell(ui, setter, &params.cp(Module::Global, 0, 1), "KEY", 92.0);
+                        cell(ui, setter, &params.cp(Module::Global, 0, 2), "STEREO", 96.0);
+                        cell(
+                            ui,
+                            setter,
+                            &params.cp(Module::Global, 0, 3),
+                            "SQUEEZE",
+                            92.0,
+                        );
+                        cell(ui, setter, &params.cp(Module::Global, 0, 4), "LEVEL", 104.0);
+                        cell(ui, setter, &params.cp(Module::Global, 0, 5), "VOICES", 86.0);
+                        ui.add_space(12.0);
 
-                    // RANDOM die: click = roll, right-click = settings.
-                    let rnd = tbtn(ui, "\u{2684} RND", false, 64.0); // ⚄
-                    if rnd.clicked() {
-                        let seed = entropy_seed();
-                        roll_random(params, setter, ex, seed);
-                        ex.last_seed = seed;
-                        *ex_changed = true;
-                    }
-                    rnd.context_menu(|ui| {
-                        ui.set_min_width(220.0);
-                        if ui
-                            .add(egui::Slider::new(&mut ex.random_amount, 0.0..=1.0).text("AMOUNT"))
-                            .changed()
-                        {
-                            *ex_changed = true;
-                        }
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut ex.random_complexity, 0.0..=1.0)
-                                    .text("COMPLEXITY"),
-                            )
-                            .changed()
-                        {
-                            *ex_changed = true;
-                        }
-                        ui.label(format!("last seed {:016x}", ex.last_seed));
-                        ui.label("padlocks on section headers = locks");
-                    });
-
-                    ui.menu_button("TOOLS", |ui| {
-                        if ui.button("INIT PATCH").clicked() {
-                            apply_patch(params, setter, &Patch::init(&params.table));
-                            ui.close_menu();
-                        }
-                        if ui.button("REROLL LAST SEED").clicked() {
-                            let seed = ex.last_seed;
+                        // RANDOM die: click = roll, right-click = settings.
+                        let rnd = tbtn(ui, "\u{2684} RND", false, 64.0); // ⚄
+                        if rnd.clicked() {
+                            let seed = entropy_seed();
                             roll_random(params, setter, ex, seed);
-                            ui.close_menu();
+                            ex.last_seed = seed;
+                            *ex_changed = true;
                         }
-                        ui.separator();
-                        for (a, b, label) in
-                            [(0u8, 1u8, "COPY G1 \u{2192} G2"), (0, 2, "COPY G1 \u{2192} G3"), (1, 2, "COPY G2 \u{2192} G3")]
-                        {
-                            if ui.button(label).clicked() {
-                                copy_grain(params, setter, a, b);
+                        rnd.context_menu(|ui| {
+                            ui.set_min_width(220.0);
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut ex.random_amount, 0.0..=1.0)
+                                        .text("AMOUNT"),
+                                )
+                                .changed()
+                            {
+                                *ex_changed = true;
+                            }
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut ex.random_complexity, 0.0..=1.0)
+                                        .text("COMPLEXITY"),
+                                )
+                                .changed()
+                            {
+                                *ex_changed = true;
+                            }
+                            ui.label(format!("last seed {:016x}", ex.last_seed));
+                            ui.label("padlocks on section headers = locks");
+                        });
+
+                        ui.menu_button("TOOLS", |ui| {
+                            if ui.button("INIT PATCH").clicked() {
+                                apply_patch(params, setter, &Patch::init(&params.table));
                                 ui.close_menu();
                             }
-                        }
+                            if ui.button("REROLL LAST SEED").clicked() {
+                                let seed = ex.last_seed;
+                                roll_random(params, setter, ex, seed);
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            for (a, b, label) in [
+                                (0u8, 1u8, "COPY G1 \u{2192} G2"),
+                                (0, 2, "COPY G1 \u{2192} G3"),
+                                (1, 2, "COPY G2 \u{2192} G3"),
+                            ] {
+                                if ui.button(label).clicked() {
+                                    copy_grain(params, setter, a, b);
+                                    ui.close_menu();
+                                }
+                            }
+                        });
                     });
-
                 });
-            });
         });
 }
 
@@ -783,11 +856,10 @@ fn lanes_display(ui: &mut Ui, params: &MangleParams, st: &mut UiState) {
     }
 
     let w = ui.available_width();
-    for e in 0..3usize {
+    for (e, &col) in ENG_COLORS.iter().enumerate() {
         let (rect, resp) = ui.allocate_exact_size(vec2(w, LANE_H), Sense::click());
         fill(ui, rect, HEADER);
         frame(ui, rect, BORDER);
-        let col = ENG_COLORS[e];
         txt(
             ui,
             Pos2::new(rect.left() + 4.0, rect.center().y),
@@ -817,7 +889,8 @@ fn lanes_display(ui: &mut Ui, params: &MangleParams, st: &mut UiState) {
             }
             if b.spawns > 0 {
                 let r = 1.5 + (b.spawns as f32).sqrt().min(3.5);
-                ui.painter().circle_filled(Pos2::new(x, plot.center().y), r, with_alpha(col, 220));
+                ui.painter()
+                    .circle_filled(Pos2::new(x, plot.center().y), r, with_alpha(col, 220));
             }
         }
         if e == 0 && st.feed.voices > 0 {
@@ -908,17 +981,14 @@ fn waveform_strip(
     if is_drop {
         fill(ui, rect, ACCENT_FAINT);
         ui.painter()
-            .rect_stroke(rect, 0.0, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
+            .rect_stroke(rect, 0.0, Stroke::new(2.0_f32, ACCENT), StrokeKind::Inside);
     } else {
         frame(ui, rect, BORDER);
     }
 
     // Peaks.
     let waves = params.waveforms.read().ok();
-    let have = waves
-        .as_ref()
-        .map(|ws| ws[sel].is_some())
-        .unwrap_or(false);
+    let have = waves.as_ref().map(|ws| ws[sel].is_some()).unwrap_or(false);
     if let Some(ws) = waves.as_ref() {
         if let Some(wsum) = &ws[sel] {
             let mid = rect.center().y;
@@ -930,7 +1000,7 @@ fn waveform_strip(
                 let x = rect.left() + x as f32;
                 ui.painter().line_segment(
                     [Pos2::new(x, mid - hi * half), Pos2::new(x, mid - lo * half)],
-                    Stroke::new(1.0, DIM),
+                    Stroke::new(1.0_f32, DIM),
                 );
             }
         }
@@ -954,12 +1024,17 @@ fn waveform_strip(
     let ex_ = rect.left() + e * rect.width();
     fill(
         ui,
-        Rect::from_min_max(Pos2::new(sx, rect.top() + 1.0), Pos2::new(ex_, rect.bottom() - 1.0)),
+        Rect::from_min_max(
+            Pos2::new(sx, rect.top() + 1.0),
+            Pos2::new(ex_, rect.bottom() - 1.0),
+        ),
         Color32::from_rgba_unmultiplied(0xa4, 0xbf, 0x55, 22),
     );
     for x in [sx, ex_] {
-        ui.painter()
-            .line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], Stroke::new(2.0, ACCENT));
+        ui.painter().line_segment(
+            [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+            Stroke::new(2.0_f32, ACCENT),
+        );
     }
 
     // Live engine activity (audio feed), for engines reading this slot:
@@ -979,7 +1054,7 @@ fn waveform_strip(
             let a = ((1.0 - g.age) * 200.0).clamp(40.0, 200.0) as u8;
             ui.painter().line_segment(
                 [Pos2::new(x, y0), Pos2::new(x, y0 + 6.0)],
-                Stroke::new(2.0, with_alpha(col, a)),
+                Stroke::new(2.0_f32, with_alpha(col, a)),
             );
         }
         if ef.slot as usize == sel {
@@ -997,7 +1072,7 @@ fn waveform_strip(
                 };
                 ui.painter().line_segment(
                     [Pos2::new(x, y0), Pos2::new(x, y1)],
-                    Stroke::new(1.0, with_alpha(col, 180)),
+                    Stroke::new(1.0_f32, with_alpha(col, 180)),
                 );
             }
         }
@@ -1058,18 +1133,30 @@ fn waveform_strip(
                 .ok()
                 .map(|w| w[i].is_some())
                 .unwrap_or(false);
-            let label = if loaded { format!("[{}]", i + 1) } else { format!(" {} ", i + 1) };
+            let label = if loaded {
+                format!("[{}]", i + 1)
+            } else {
+                format!(" {} ", i + 1)
+            };
             let r = tbtn(ui, &label, i == sel, 34.0);
             if r.clicked() {
                 st.selected_slot = i;
             }
             if files_hover {
-                if ui.ctx().pointer_hover_pos().is_some_and(|p| r.rect.contains(p)) {
+                if ui
+                    .ctx()
+                    .pointer_hover_pos()
+                    .is_some_and(|p| r.rect.contains(p))
+                {
                     hovered_tab = Some(i);
                 }
                 if st.drop_target == Some(i) {
-                    ui.painter()
-                        .rect_stroke(r.rect, 0.0, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
+                    ui.painter().rect_stroke(
+                        r.rect,
+                        0.0,
+                        Stroke::new(2.0_f32, ACCENT),
+                        StrokeKind::Inside,
+                    );
                 }
             }
         }
@@ -1085,8 +1172,20 @@ fn waveform_strip(
             open_file_dialog(params, sel);
         }
         ui.add_space(8.0);
-        cell(ui, setter, &params.cp(Module::Slot, sel as u8, 0), "ROOT", 90.0);
-        cell(ui, setter, &params.cp(Module::Slot, sel as u8, 3), "GAIN", 100.0);
+        cell(
+            ui,
+            setter,
+            &params.cp(Module::Slot, sel as u8, 0),
+            "ROOT",
+            90.0,
+        );
+        cell(
+            ui,
+            setter,
+            &params.cp(Module::Slot, sel as u8, 3),
+            "GAIN",
+            100.0,
+        );
         ui.add_space(8.0);
         section_label(ui, "LOOP.POINTS");
         lock_btn(ui, &mut ex.locks.loop_points, ex_changed);
@@ -1171,18 +1270,18 @@ fn engines_page(
     let eng = st.engine_page.min(2);
     ui.horizontal(|ui| {
         section_label(ui, "ENGINE");
-        for e in 0..3usize {
+        for (e, col) in ENG_COLORS.iter().enumerate() {
             let r = tbtn(ui, &format!("G{}", e + 1), e == eng, 44.0);
             if r.clicked() {
                 st.engine_page = e;
             }
             // Activity dot in the engine's color: bright while it sounds.
-            let active = st.feed.engines[e].n_grains > 0
-                || st.feed.engines[e].cursor[0].is_finite();
+            let active =
+                st.feed.engines[e].n_grains > 0 || st.feed.engines[e].cursor[0].is_finite();
             ui.painter().circle_filled(
                 Pos2::new(r.rect.right() - 5.0, r.rect.top() + 5.0),
                 2.0,
-                with_alpha(ENG_COLORS[e], if active { 255 } else { 60 }),
+                with_alpha(*col, if active { 255 } else { 60 }),
             );
         }
         ui.add_space(12.0);
@@ -1245,7 +1344,13 @@ fn engines_page(
             for pair in LFO_GRID.chunks(2) {
                 ui.horizontal(|ui| {
                     for (idx, label) in pair {
-                        cell(ui, setter, &params.cp(Module::LoopLfo, eng as u8, *idx), label, cw);
+                        cell(
+                            ui,
+                            setter,
+                            &params.cp(Module::LoopLfo, eng as u8, *idx),
+                            label,
+                            cw,
+                        );
                     }
                 });
             }
@@ -1276,7 +1381,14 @@ fn lfo_and_friends(
             // Header row.
             ui.horizontal(|ui| {
                 let (hr, _) = ui.allocate_exact_size(vec2(label_w, CELL_H), Sense::hover());
-                txt(ui, Pos2::new(hr.left() + 2.0, hr.center().y), Align2::LEFT_CENTER, "LFO", 10.0, BRIGHT);
+                txt(
+                    ui,
+                    Pos2::new(hr.left() + 2.0, hr.center().y),
+                    Align2::LEFT_CENTER,
+                    "LFO",
+                    10.0,
+                    BRIGHT,
+                );
                 for (_, label) in LFO_GRID.iter() {
                     let (cr, _) = ui.allocate_exact_size(vec2(cw, CELL_H), Sense::hover());
                     txt(ui, cr.center(), Align2::CENTER_CENTER, label, 9.0, DIM);
@@ -1285,8 +1397,16 @@ fn lfo_and_friends(
             for l in 0..6usize {
                 ui.horizontal(|ui| {
                     // Left label cell: "n" + padlock, fixed width.
-                    let (lr, _) = ui.allocate_exact_size(vec2(label_w - 18.0, CELL_H), Sense::hover());
-                    txt(ui, Pos2::new(lr.left() + 4.0, lr.center().y), Align2::LEFT_CENTER, &format!("{}", l + 1), 10.0, BRIGHT);
+                    let (lr, _) =
+                        ui.allocate_exact_size(vec2(label_w - 18.0, CELL_H), Sense::hover());
+                    txt(
+                        ui,
+                        Pos2::new(lr.left() + 4.0, lr.center().y),
+                        Align2::LEFT_CENTER,
+                        &format!("{}", l + 1),
+                        10.0,
+                        BRIGHT,
+                    );
                     lock_btn(ui, &mut ex.locks.lfo[l], ex_changed);
                     for (idx, _) in LFO_GRID.iter() {
                         cell_nolabel(ui, setter, &params.cp(Module::Lfo, l as u8, *idx), cw);
@@ -1303,14 +1423,26 @@ fn lfo_and_friends(
                 section_label(ui, "DRIFT");
                 lock_btn(ui, &mut ex.locks.drift, ex_changed);
                 for d in 0..3u8 {
-                    cell(ui, setter, &params.cp(Module::Drift, d, 0), &format!("ST.PH.{}", d + 1), cw);
+                    cell(
+                        ui,
+                        setter,
+                        &params.cp(Module::Drift, d, 0),
+                        &format!("ST.PH.{}", d + 1),
+                        cw,
+                    );
                 }
             });
             ui.horizontal(|ui| {
                 section_label(ui, "NOISE");
                 lock_btn(ui, &mut ex.locks.noise, ex_changed);
                 for d in 0..3u8 {
-                    cell(ui, setter, &params.cp(Module::Noise, d, 0), &format!("ST.PH.{}", d + 1), cw);
+                    cell(
+                        ui,
+                        setter,
+                        &params.cp(Module::Noise, d, 0),
+                        &format!("ST.PH.{}", d + 1),
+                        cw,
+                    );
                 }
             });
             ui.add_space(GAP);
@@ -1323,7 +1455,13 @@ fn lfo_and_friends(
                 ui.horizontal(|ui| {
                     for c in 0..4u8 {
                         let m = row * 4 + c;
-                        cell(ui, setter, &params.cp(Module::Macro, m, 0), &format!("M{}", m + 1), mw);
+                        cell(
+                            ui,
+                            setter,
+                            &params.cp(Module::Macro, m, 0),
+                            &format!("M{}", m + 1),
+                            mw,
+                        );
                     }
                 });
             }
@@ -1382,7 +1520,13 @@ fn matrix_panel(
         ui.horizontal(|ui| {
             for (col, w) in widths.iter().enumerate() {
                 let label = if r == 0 { COLS[col] } else { "" };
-                cell(ui, setter, &params.cp(Module::Matrix, row, col as u8), label, *w);
+                cell(
+                    ui,
+                    setter,
+                    &params.cp(Module::Matrix, row, col as u8),
+                    label,
+                    *w,
+                );
             }
         });
     }
@@ -1417,7 +1561,7 @@ fn curves_screen(
     let mid = rect.center().y;
     ui.painter().line_segment(
         [Pos2::new(rect.left(), mid), Pos2::new(rect.right(), mid)],
-        Stroke::new(1.0, BORDER),
+        Stroke::new(1.0_f32, BORDER),
     );
 
     // Draw the curve.
@@ -1430,7 +1574,8 @@ fn curves_screen(
             let v = c.sample(t);
             let p = Pos2::new(rect.left() + x as f32, mid - v * half);
             if let Some(q) = prev {
-                ui.painter().line_segment([q, p], Stroke::new(1.5, ACCENT));
+                ui.painter()
+                    .line_segment([q, p], Stroke::new(1.5_f32, ACCENT));
             }
             prev = Some(p);
         }
@@ -1445,8 +1590,16 @@ fn curves_screen(
             let (a, av) = st.last_draw.unwrap_or((idx, val));
             let (lo, hi) = if a <= idx { (a, idx) } else { (idx, a) };
             for i in lo..=hi {
-                let t = if hi == lo { 1.0 } else { (i - lo) as f32 / (hi - lo) as f32 };
-                let v = if a <= idx { av + (val - av) * t } else { val + (av - val) * t };
+                let t = if hi == lo {
+                    1.0
+                } else {
+                    (i - lo) as f32 / (hi - lo) as f32
+                };
+                let v = if a <= idx {
+                    av + (val - av) * t
+                } else {
+                    val + (av - val) * t
+                };
                 ex.curves[sel].0[i] = v;
             }
             st.last_draw = Some((idx, val));
@@ -1548,7 +1701,12 @@ mod gui_tests {
     }
 
     fn press(pos: Pos2, pressed: bool) -> Event {
-        Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::default() }
+        Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::default(),
+        }
     }
     fn click(ev: &mut Vec<Event>, x: f32, y: f32) {
         let pos = Pos2::new(x, y);
@@ -1663,7 +1821,11 @@ mod gui_tests {
         // Loop-edge drag across the waveform strip.
         {
             let mut ev = Vec::new();
-            drag(&mut ev, Pos2::new(200.0, 120.0), (1..=12).map(|i| Pos2::new(200.0 + i as f32 * 28.0, 120.0)));
+            drag(
+                &mut ev,
+                Pos2::new(200.0, 120.0),
+                (1..=12).map(|i| Pos2::new(200.0 + i as f32 * 28.0, 120.0)),
+            );
             frame(&mut st, ev);
         }
 
@@ -1711,7 +1873,12 @@ mod gui_tests {
             drag(
                 &mut ev,
                 Pos2::new(120.0, 300.0),
-                (1..=20).map(|i| Pos2::new(120.0 + i as f32 * 15.0, 300.0 + (i as f32 * 0.5).sin() * 40.0)),
+                (1..=20).map(|i| {
+                    Pos2::new(
+                        120.0 + i as f32 * 15.0,
+                        300.0 + (i as f32 * 0.5).sin() * 40.0,
+                    )
+                }),
             );
             frame(&mut st, ev);
         }
@@ -1724,8 +1891,14 @@ mod gui_tests {
             host.sets.load(Ordering::Relaxed),
             host.ends.load(Ordering::Relaxed),
         );
-        assert!(s > 0, "no parameter writes were triggered by the input sweep");
-        assert_eq!(b, e, "unbalanced begin/end parameter gestures ({b} begins, {e} ends)");
+        assert!(
+            s > 0,
+            "no parameter writes were triggered by the input sweep"
+        );
+        assert_eq!(
+            b, e,
+            "unbalanced begin/end parameter gestures ({b} begins, {e} ends)"
+        );
     }
 
     /// Minimal mono 16-bit PCM WAV, enough for symphonia to decode.
@@ -1771,7 +1944,10 @@ mod gui_tests {
         tiny_wav(&wav_a);
         tiny_wav(&wav_b);
 
-        let mut frame = |st: &mut UiState, hovered: &[&std::path::Path], dropped: &[&std::path::Path], events: Vec<Event>| {
+        let mut frame = |st: &mut UiState,
+                         hovered: &[&std::path::Path],
+                         dropped: &[&std::path::Path],
+                         events: Vec<Event>| {
             time += 0.05;
             let input = RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 700.0))),
@@ -1779,11 +1955,17 @@ mod gui_tests {
                 events,
                 hovered_files: hovered
                     .iter()
-                    .map(|p| egui::HoveredFile { path: Some(p.to_path_buf()), ..Default::default() })
+                    .map(|p| egui::HoveredFile {
+                        path: Some(p.to_path_buf()),
+                        ..Default::default()
+                    })
                     .collect(),
                 dropped_files: dropped
                     .iter()
-                    .map(|p| egui::DroppedFile { path: Some(p.to_path_buf()), ..Default::default() })
+                    .map(|p| egui::DroppedFile {
+                        path: Some(p.to_path_buf()),
+                        ..Default::default()
+                    })
                     .collect(),
                 ..Default::default()
             };
@@ -1794,7 +1976,11 @@ mod gui_tests {
         frame(&mut st, &[], &[], vec![]);
         st.selected_slot = 2;
         frame(&mut st, &[&wav_a], &[], vec![]);
-        assert_eq!(st.drop_target, Some(2), "hovering files should target the selected slot");
+        assert_eq!(
+            st.drop_target,
+            Some(2),
+            "hovering files should target the selected slot"
+        );
 
         // Drop two files: they land in successive slots from the target, the
         // decoded samples sit in the queue for the audio thread, and the
@@ -1803,10 +1989,17 @@ mod gui_tests {
         {
             let q = params.pending_loads.lock().unwrap();
             let slots: Vec<usize> = q.iter().map(|p| p.slot).collect();
-            assert_eq!(slots, vec![2, 3], "dropped files should queue into successive slots");
+            assert_eq!(
+                slots,
+                vec![2, 3],
+                "dropped files should queue into successive slots"
+            );
             assert!(q.iter().all(|p| !p.consumed));
         }
-        assert_eq!(st.selected_slot, 2, "the first dropped slot becomes selected");
+        assert_eq!(
+            st.selected_slot, 2,
+            "the first dropped slot becomes selected"
+        );
         assert_eq!(st.drop_target, None);
         assert!(!st.status.is_empty(), "a drop should surface a status line");
         assert!(
@@ -1817,8 +2010,16 @@ mod gui_tests {
 
         // Hover with the pointer over a slot tab: that tab becomes the target
         // (needs one frame for the strip's slot row to see the pointer).
-        let over_tab_4 = Pos2::new(4.0 + 3.0 * (34.0 + 8.0) + 17.0, 4.0 + 120.0 + 8.0 + CELL_H * 0.5);
-        frame(&mut st, &[&wav_a], &[], vec![Event::PointerMoved(over_tab_4)]);
+        let over_tab_4 = Pos2::new(
+            4.0 + 3.0 * (34.0 + 8.0) + 17.0,
+            4.0 + 120.0 + 8.0 + CELL_H * 0.5,
+        );
+        frame(
+            &mut st,
+            &[&wav_a],
+            &[],
+            vec![Event::PointerMoved(over_tab_4)],
+        );
         frame(&mut st, &[&wav_a], &[], vec![]);
         // The exact tab depends on layout spacing; deterministic either way is
         // that a hover always resolves to a valid slot target.

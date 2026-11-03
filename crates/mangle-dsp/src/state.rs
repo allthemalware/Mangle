@@ -262,8 +262,9 @@ pub fn hex_encode(data: &[u8]) -> String {
 }
 
 // `usize::is_multiple_of` would be cleaner but needs Rust 1.87; the crate keeps
-// a lower MSRV (see the blake3 pin), so the explicit modulo stays.
-#[allow(clippy::manual_is_multiple_of)]
+// a lower MSRV (see the blake3 pin), so the explicit modulo stays; likewise
+// `as_chunks` is too new, so `chunks_exact(2)` stays.
+#[allow(clippy::manual_is_multiple_of, clippy::chunks_exact_to_as_chunks)]
 pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
     if s.len() % 2 != 0 {
         return None;
@@ -336,7 +337,10 @@ mod tests {
         st.locks.lfo[2] = true;
         st.random_amount = 0.33;
         st.last_seed = 0x1234_5678_9ABC_DEF0;
-        st.slot_refs[1] = Some(SlotRef { path: "/x/y.wav".to_string(), content_hash: 99 });
+        st.slot_refs[1] = Some(SlotRef {
+            path: "/x/y.wav".to_string(),
+            content_hash: 99,
+        });
 
         let mut bytes = serialize(&st);
         bytes[4] = 2; // version u16 (LE) low byte: 1 -> 2
@@ -360,7 +364,7 @@ mod tests {
 
     #[test]
     fn lock_bits_roundtrip_all_patterns() {
-        for bits in [0u32, 0x1FFFF, 0b1010_1010_1010_1010_1, 0x0F0F0] {
+        for bits in [0u32, 0x1FFFF, 0b1_0101_0101_0101_0101, 0x0F0F0] {
             let l = unpack_locks(bits);
             assert_eq!(pack_locks(&l), bits & 0x1FFFF);
         }

@@ -106,7 +106,10 @@ mod tests {
         let in_rms = rms(&l);
         sq.process(&mut l, &mut r);
         let out_rms = rms(&l[48_000..]); // settled half
-        assert!(out_rms > in_rms * 3.0, "boost too weak: {in_rms} → {out_rms}");
+        assert!(
+            out_rms > in_rms * 3.0,
+            "boost too weak: {in_rms} → {out_rms}"
+        );
         for v in l.iter() {
             assert!(v.is_finite());
         }
@@ -135,7 +138,11 @@ mod tests {
         let mut probe_l = vec![0.5f32; 8];
         let mut probe_r = vec![0.5f32; 8];
         sq.process(&mut probe_l, &mut probe_r);
-        assert!(probe_l[0] <= 0.55, "gain wound up during silence: {}", probe_l[0]);
+        assert!(
+            probe_l[0] <= 0.55,
+            "gain wound up during silence: {}",
+            probe_l[0]
+        );
     }
 
     #[test]
@@ -145,7 +152,10 @@ mod tests {
         let mut l = sine(0.05, 96_000, sr);
         let mut r = vec![0.0f32; 96_000];
         sq.process(&mut l, &mut r);
-        assert!(r.iter().all(|v| *v == 0.0), "silent channel must stay silent");
+        assert!(
+            r.iter().all(|v| *v == 0.0),
+            "silent channel must stay silent"
+        );
         assert!(rms(&l[48_000..]) > 0.05, "left should still be leveled up");
     }
 
@@ -162,8 +172,14 @@ mod tests {
         let in_rms = rms(&l);
         sq.process(&mut l, &mut r);
         let out_rms = rms(&l[48_000..]);
-        assert!(out_rms.is_finite(), "leveler stuck at NaN after a NaN input");
-        assert!(out_rms > in_rms * 3.0, "boost did not resume after NaN: {in_rms} → {out_rms}");
+        assert!(
+            out_rms.is_finite(),
+            "leveler stuck at NaN after a NaN input"
+        );
+        assert!(
+            out_rms > in_rms * 3.0,
+            "boost did not resume after NaN: {in_rms} → {out_rms}"
+        );
     }
 
     #[test]

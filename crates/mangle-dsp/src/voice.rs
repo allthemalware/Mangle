@@ -48,8 +48,16 @@ impl Voice {
             expr_volume: 1.0,
             expr_pan: 0.0,
             gate: false,
-            lanes: [Lane::new(seed), Lane::new(seed ^ 0x9E37), Lane::new(seed ^ 0x79B9)],
-            loop_lfos: [LfoState::default(), LfoState::default(), LfoState::default()],
+            lanes: [
+                Lane::new(seed),
+                Lane::new(seed ^ 0x9E37),
+                Lane::new(seed ^ 0x79B9),
+            ],
+            loop_lfos: [
+                LfoState::default(),
+                LfoState::default(),
+                LfoState::default(),
+            ],
             mod_offsets: Vec::with_capacity(128),
             last_scan: [(0.0, 0.0); 3],
             was_sounding: false,
@@ -85,7 +93,11 @@ impl VoiceManager {
         let voices = (0..16)
             .map(|i| Voice::new(seed ^ (i as u64).wrapping_mul(0xA5A5_5A5A)))
             .collect();
-        Self { voices, max_voices: max_voices.clamp(1, 16), counter: 0 }
+        Self {
+            voices,
+            max_voices: max_voices.clamp(1, 16),
+            counter: 0,
+        }
     }
 
     pub fn set_max_voices(&mut self, n: usize) {
@@ -153,7 +165,11 @@ impl VoiceManager {
     /// Gate off the matching voice (by note id when given, else by note).
     pub fn note_off(&mut self, note: u8, note_id: i32) {
         for v in self.voices.iter_mut() {
-            let hit = if note_id >= 0 { v.note_id == note_id } else { v.note == note };
+            let hit = if note_id >= 0 {
+                v.note_id == note_id
+            } else {
+                v.note == note
+            };
             if hit && v.gate {
                 v.gate = false;
             }
@@ -194,8 +210,11 @@ mod tests {
         let mut vm = VoiceManager::new(2, 1);
         vm.note_on(60, 1, 0, 0.8, 0.0); // voice 0: older, stays held
         vm.note_on(64, 2, 0, 0.8, 0.0); // voice 1: newer
-        // Give both voices live grains so they count as "ringing".
-        let p = LaneParams { loop_on: false, ..Default::default() };
+                                        // Give both voices live grains so they count as "ringing".
+        let p = LaneParams {
+            loop_on: false,
+            ..Default::default()
+        };
         let mut l = vec![0.0f32; 256];
         let mut r = vec![0.0f32; 256];
         for v in vm.voices.iter_mut().take(2) {
@@ -209,8 +228,14 @@ mod tests {
         // A new note steals the released voice, sparing the older *held* note 60
         // (pure oldest-stealing would have taken 60 instead).
         vm.note_on(67, 3, 0, 0.8, 0.0);
-        assert!(vm.voices.iter().any(|v| v.note == 60 && v.gate), "older held note was stolen");
-        assert!(vm.voices.iter().any(|v| v.note == 67 && v.gate), "new note not allocated");
+        assert!(
+            vm.voices.iter().any(|v| v.note == 60 && v.gate),
+            "older held note was stolen"
+        );
+        assert!(
+            vm.voices.iter().any(|v| v.note == 67 && v.gate),
+            "new note not allocated"
+        );
         assert!(
             !vm.voices.iter().any(|v| v.note == 64 && v.note_id == 2),
             "released voice should have been reused"

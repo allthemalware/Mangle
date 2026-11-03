@@ -162,7 +162,11 @@ mod tests {
                 for i in 0..=20 {
                     let t = i as f32 / 20.0;
                     let pk = (0.5 + 0.499 * skew).clamp(0.001, 0.999);
-                    let w = if t < pk { 0.5 * t / pk } else { 0.5 + 0.5 * (t - pk) / (1.0 - pk) };
+                    let w = if t < pk {
+                        0.5 * t / pk
+                    } else {
+                        0.5 + 0.5 * (t - pk) / (1.0 - pk)
+                    };
                     let cw = 0.5 - 0.5 * (core::f32::consts::TAU * w).cos();
                     let reference = cw.powf(1.0 - 0.999 * shape);
                     let got = grain_envelope(t, shape, skew);

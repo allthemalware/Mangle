@@ -20,8 +20,8 @@
 use crate::matrix::{self, ModDest, ModSource, Owner};
 use crate::params::{
     pid, Module, ParamTable, Patch, GRAIN_LEVEL_IDX, GRAIN_PITCH_IDX, GRAIN_QUANT_IDX,
-    LFO_ONESHOT_IDX, LFO_TRIG_IDX, N_GRAIN_PARAMS, N_LFO_PARAMS, N_MATRIX_ROWS,
-    SLOT_LOOP_END_IDX, SLOT_LOOP_START_IDX,
+    LFO_ONESHOT_IDX, LFO_TRIG_IDX, N_GRAIN_PARAMS, N_LFO_PARAMS, N_MATRIX_ROWS, SLOT_LOOP_END_IDX,
+    SLOT_LOOP_START_IDX,
 };
 use crate::rng::Rng;
 
@@ -170,14 +170,24 @@ impl Default for DestPool {
         // Mirrors Torsion's Modulation Dest Pool defaults: Gate, Pitch and
         // Level destinations off; LFO Rate the only LFO destination on.
         let mut grain = [true; 14];
-        grain[matrix::GRAIN_DESTS.iter().position(|&d| d == matrix::GrainDest::Gate).unwrap()] =
-            false;
-        grain[matrix::GRAIN_DESTS.iter().position(|&d| d == matrix::GrainDest::Pitch).unwrap()] =
-            false;
-        grain[matrix::GRAIN_DESTS.iter().position(|&d| d == matrix::GrainDest::Level).unwrap()] =
-            false;
+        grain[matrix::GRAIN_DESTS
+            .iter()
+            .position(|&d| d == matrix::GrainDest::Gate)
+            .unwrap()] = false;
+        grain[matrix::GRAIN_DESTS
+            .iter()
+            .position(|&d| d == matrix::GrainDest::Pitch)
+            .unwrap()] = false;
+        grain[matrix::GRAIN_DESTS
+            .iter()
+            .position(|&d| d == matrix::GrainDest::Level)
+            .unwrap()] = false;
         let lfo = [false, false, true, false];
-        Self { grain, lfo, loop_lfo: lfo }
+        Self {
+            grain,
+            lfo,
+            loop_lfo: lfo,
+        }
     }
 }
 
@@ -404,7 +414,11 @@ mod tests {
     #[test]
     fn amount_zero_is_a_noop() {
         let t = ParamTable::new();
-        let opts = RandomOptions { amount: 0.0, complexity: 1.0, ..Default::default() };
+        let opts = RandomOptions {
+            amount: 0.0,
+            complexity: 1.0,
+            ..Default::default()
+        };
         let init = Patch::init(&t);
         let mut p = init.clone();
         randomize(&mut p, &t, &opts, 99);
@@ -414,10 +428,14 @@ mod tests {
     #[test]
     fn locked_units_are_untouched() {
         let t = ParamTable::new();
-        let mut opts = RandomOptions { amount: 1.0, complexity: 1.0, ..Default::default() };
+        let mut opts = RandomOptions {
+            amount: 1.0,
+            complexity: 1.0,
+            ..Default::default()
+        };
         opts.locks.grain[1] = true; // lock Grain 2
         opts.locks.lfo[4] = true; // lock LFO 5
-        // Open every parameter pool so only the locks are doing the protecting.
+                                  // Open every parameter pool so only the locks are doing the protecting.
         opts.grain_pool = GrainParamPool([true; N_GRAIN_PARAMS]);
         opts.lfo_pool = LfoParamPool([true; N_LFO_PARAMS]);
 
@@ -441,15 +459,20 @@ mod tests {
             );
         }
         // Something in the unlocked engines did move.
-        assert!(changed
-            .iter()
-            .any(|id| { let i = t.get(*id); i.module == Module::Grain && i.instance == 0 }));
+        assert!(changed.iter().any(|id| {
+            let i = t.get(*id);
+            i.module == Module::Grain && i.instance == 0
+        }));
     }
 
     #[test]
     fn matrix_never_routes_into_locked_units() {
         let t = ParamTable::new();
-        let mut opts = RandomOptions { amount: 1.0, complexity: 1.0, ..Default::default() };
+        let mut opts = RandomOptions {
+            amount: 1.0,
+            complexity: 1.0,
+            ..Default::default()
+        };
         opts.locks.grain[2] = true; // lock Grain 3
         opts.locks.lfo[0] = true; // lock LFO 1
 
@@ -467,8 +490,7 @@ mod tests {
             }
             // Locked LFO 1 must not be used as a source or scale either.
             for col in [0usize, 5] {
-                let idx =
-                    (p.values[base + col] * (matrix::SOURCE_COUNT - 1) as f32).round() as u16;
+                let idx = (p.values[base + col] * (matrix::SOURCE_COUNT - 1) as f32).round() as u16;
                 assert_ne!(
                     matrix::source_from_index(idx),
                     ModSource::Lfo(0),
@@ -481,14 +503,22 @@ mod tests {
     #[test]
     fn matrix_lock_freezes_all_rows() {
         let t = ParamTable::new();
-        let mut opts = RandomOptions { amount: 1.0, complexity: 1.0, ..Default::default() };
+        let mut opts = RandomOptions {
+            amount: 1.0,
+            complexity: 1.0,
+            ..Default::default()
+        };
         opts.locks.matrix = true;
         let init = Patch::init(&t);
         let mut p = init.clone();
         randomize(&mut p, &t, &opts, 31337);
         for (i, info) in t.infos.iter().enumerate() {
             if info.module == Module::Matrix {
-                assert_eq!(p.values[i], init.values[i], "matrix param moved: {}", info.name);
+                assert_eq!(
+                    p.values[i], init.values[i],
+                    "matrix param moved: {}",
+                    info.name
+                );
             }
         }
     }
@@ -496,7 +526,11 @@ mod tests {
     #[test]
     fn default_pools_exclude_grain_level_and_pitch() {
         let t = ParamTable::new();
-        let opts = RandomOptions { amount: 1.0, complexity: 1.0, ..Default::default() };
+        let opts = RandomOptions {
+            amount: 1.0,
+            complexity: 1.0,
+            ..Default::default()
+        };
         let init = Patch::init(&t);
         let mut p = init.clone();
         randomize(&mut p, &t, &opts, 4242);
@@ -512,7 +546,11 @@ mod tests {
     fn loop_points_lock_and_window_sanity() {
         let t = ParamTable::new();
         // Locked: untouched.
-        let mut opts = RandomOptions { amount: 1.0, complexity: 1.0, ..Default::default() };
+        let mut opts = RandomOptions {
+            amount: 1.0,
+            complexity: 1.0,
+            ..Default::default()
+        };
         opts.locks.loop_points = true;
         let init = Patch::init(&t);
         let mut p = init.clone();
@@ -524,7 +562,11 @@ mod tests {
             }
         }
         // Unlocked: start < end always holds.
-        let opts = RandomOptions { amount: 1.0, complexity: 1.0, ..Default::default() };
+        let opts = RandomOptions {
+            amount: 1.0,
+            complexity: 1.0,
+            ..Default::default()
+        };
         for seed in 0..32u64 {
             let mut p = Patch::init(&t);
             randomize(&mut p, &t, &opts, seed);
@@ -539,7 +581,11 @@ mod tests {
     #[test]
     fn root_note_and_gain_never_randomized() {
         let t = ParamTable::new();
-        let opts = RandomOptions { amount: 1.0, complexity: 1.0, ..Default::default() };
+        let opts = RandomOptions {
+            amount: 1.0,
+            complexity: 1.0,
+            ..Default::default()
+        };
         let init = Patch::init(&t);
         let mut p = init.clone();
         randomize(&mut p, &t, &opts, 6);

@@ -27,6 +27,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use mangle_dsp::curve::Curve;
+use mangle_dsp::engine::{MODE_NAMES, QUANT_NAMES};
+use mangle_dsp::filter::Svf;
 use mangle_dsp::matrix;
 use mangle_dsp::modengine::{
     apply_global, apply_voice, decode_matrix, fill_voice_sources, modulated_filter, DecodedRow,
@@ -35,8 +37,6 @@ use mangle_dsp::modengine::{
 use mangle_dsp::params::{self as mp, flags, Map, Module, ParamInfo, ParamTable, Patch};
 use mangle_dsp::resolve;
 use mangle_dsp::rng::Rng;
-use mangle_dsp::engine::{MODE_NAMES, QUANT_NAMES};
-use mangle_dsp::filter::Svf;
 use mangle_dsp::sample::{SampleBank, SampleSlot, ALGO_NAMES};
 use mangle_dsp::squeeze::Squeeze;
 
@@ -46,8 +46,8 @@ const FILTER_TYPE_NAMES: [&str; 4] = ["LP", "BP", "HP", "Notch"];
 /// Control-chunk size in samples: modulation tick rate and the upper bound of
 /// any one render segment (segments also split at note-event timings).
 const CTRL_CHUNK: usize = 64;
-use mangle_dsp::state::{self, ExtraState};
 use mangle_dsp::state::SlotRef;
+use mangle_dsp::state::{self, ExtraState};
 use mangle_dsp::voice::VoiceManager;
 
 mod editor;
@@ -145,7 +145,9 @@ fn group_name(info: &ParamInfo) -> String {
 }
 
 fn note_name(v: i32) -> String {
-    const N: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const N: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
     let v = v.clamp(0, 127);
     format!("{}{}", N[(v % 12) as usize], v / 12 - 2)
 }
@@ -190,14 +192,20 @@ impl MangleParams {
         for info in table.infos.iter() {
             match info.map {
                 Map::Bool => {
-                    bools.push(BoolParam::new(info.name.clone(), info.default_display >= 0.5));
+                    bools.push(BoolParam::new(
+                        info.name.clone(),
+                        info.default_display >= 0.5,
+                    ));
                     slots.push(PSlot::B(bools.len() - 1));
                 }
                 Map::Steps { count } => {
                     let p = IntParam::new(
                         info.name.clone(),
                         info.default_display as i32,
-                        IntRange::Linear { min: 0, max: count as i32 - 1 },
+                        IntRange::Linear {
+                            min: 0,
+                            max: count as i32 - 1,
+                        },
                     )
                     .with_value_to_string(int_formatter(info));
                     ints.push(p);
@@ -278,7 +286,9 @@ impl MangleParams {
         for (pos, slot) in self.slots.iter().enumerate() {
             patch.values[pos] = match slot {
                 PSlot::F(i) => self.floats[*i].value(),
-                PSlot::I(i) => self.table.infos[pos].map.to_norm(self.ints[*i].value() as f32),
+                PSlot::I(i) => self.table.infos[pos]
+                    .map
+                    .to_norm(self.ints[*i].value() as f32),
                 PSlot::B(i) => {
                     if self.bools[*i].value() {
                         1.0
@@ -321,7 +331,10 @@ unsafe impl Params for MangleParams {
     fn serialize_fields(&self) -> BTreeMap<String, String> {
         let mut map = BTreeMap::new();
         if let Ok(st) = self.extra.read() {
-            map.insert("mangle_state".to_string(), state::hex_encode(&state::serialize(&st)));
+            map.insert(
+                "mangle_state".to_string(),
+                state::hex_encode(&state::serialize(&st)),
+            );
         }
         map
     }
@@ -421,7 +434,10 @@ pub(crate) fn summarize(slot: &SampleSlot) -> WaveSummary {
     let n = slot.len();
     let mut peaks = Vec::with_capacity(BUCKETS);
     if n == 0 {
-        return WaveSummary { peaks, len_samples: 0 };
+        return WaveSummary {
+            peaks,
+            len_samples: 0,
+        };
     }
     for b in 0..BUCKETS {
         let a = b * n / BUCKETS;
@@ -435,7 +451,10 @@ pub(crate) fn summarize(slot: &SampleSlot) -> WaveSummary {
         }
         peaks.push((lo, hi));
     }
-    WaveSummary { peaks, len_samples: n }
+    WaveSummary {
+        peaks,
+        len_samples: n,
+    }
 }
 
 impl Mangle {
@@ -458,9 +477,17 @@ impl Mangle {
     /// is the per-engine Gate-Sync flag set (resolved once from the base patch).
     fn apply_event(&mut self, event: NoteEvent<()>, gate_sync: &[bool; 3]) {
         match event {
-            NoteEvent::NoteOn { note, velocity, voice_id, channel, .. } => {
+            NoteEvent::NoteOn {
+                note,
+                velocity,
+                voice_id,
+                channel,
+                ..
+            } => {
                 let vr = self.rng.bipolar();
-                let v = self.vm.note_on(note, voice_id.unwrap_or(-1), channel, velocity, vr);
+                let v = self
+                    .vm
+                    .note_on(note, voice_id.unwrap_or(-1), channel, velocity, vr);
                 for (e, gs) in gate_sync.iter().enumerate() {
                     if *gs {
                         v.loop_lfos[e].trig();
@@ -484,7 +511,12 @@ impl Mangle {
                     }
                 }
             }
-            NoteEvent::PolyPressure { voice_id, note, pressure, .. } => {
+            NoteEvent::PolyPressure {
+                voice_id,
+                note,
+                pressure,
+                ..
+            } => {
                 for v in self.vm.voices.iter_mut() {
                     let hit = match voice_id {
                         Some(id) => v.note_id == id,
@@ -502,7 +534,12 @@ impl Mangle {
                     }
                 }
             }
-            NoteEvent::PolyTuning { voice_id, note, tuning, .. } => {
+            NoteEvent::PolyTuning {
+                voice_id,
+                note,
+                tuning,
+                ..
+            } => {
                 for v in self.vm.voices.iter_mut() {
                     let hit = match voice_id {
                         Some(id) => v.note_id == id,
@@ -513,7 +550,12 @@ impl Mangle {
                     }
                 }
             }
-            NoteEvent::PolyVolume { voice_id, note, gain, .. } => {
+            NoteEvent::PolyVolume {
+                voice_id,
+                note,
+                gain,
+                ..
+            } => {
                 for v in self.vm.voices.iter_mut() {
                     let hit = match voice_id {
                         Some(id) => v.note_id == id,
@@ -524,7 +566,12 @@ impl Mangle {
                     }
                 }
             }
-            NoteEvent::PolyPan { voice_id, note, pan, .. } => {
+            NoteEvent::PolyPan {
+                voice_id,
+                note,
+                pan,
+                ..
+            } => {
                 for v in self.vm.voices.iter_mut() {
                     let hit = match voice_id {
                         Some(id) => v.note_id == id,
@@ -535,12 +582,21 @@ impl Mangle {
                     }
                 }
             }
-            NoteEvent::PolyModulation { voice_id, poly_modulation_id, normalized_offset, .. } => {
+            NoteEvent::PolyModulation {
+                voice_id,
+                poly_modulation_id,
+                normalized_offset,
+                ..
+            } => {
                 if let Some(v) = self.vm.voices.iter_mut().find(|v| v.note_id == voice_id) {
                     v.set_mod_offset(poly_modulation_id, normalized_offset);
                 }
             }
-            NoteEvent::MonoAutomation { poly_modulation_id, normalized_value, .. } => {
+            NoteEvent::MonoAutomation {
+                poly_modulation_id,
+                normalized_value,
+                ..
+            } => {
                 self.set_mono_override(poly_modulation_id, normalized_value);
             }
             _ => {}
@@ -646,8 +702,10 @@ impl Plugin for Mangle {
                     Ok(loaded) => {
                         nih_log!("Mangle: loaded MANGLE_SAMPLE '{}'", p);
                         if let Ok(mut st) = self.params.extra.write() {
-                            st.slot_refs[0] =
-                                Some(SlotRef { path: p.clone(), content_hash: loaded.content_hash });
+                            st.slot_refs[0] = Some(SlotRef {
+                                path: p.clone(),
+                                content_hash: loaded.content_hash,
+                            });
                         }
                         self.params.extra_gen.fetch_add(1, Ordering::Release);
                         self.bank.slots[0] = Some(loaded.slot);
@@ -663,7 +721,10 @@ impl Plugin for Mangle {
             self.bank.slots[0] = Some(SampleSlot::test_tone(self.sample_rate));
             self.refresh_waveform(0);
         }
-        nih_log!("Mangle: {} host params generated from the table", self.params.table.len());
+        nih_log!(
+            "Mangle: {} host params generated from the table",
+            self.params.table.len()
+        );
         true
     }
 
@@ -826,8 +887,12 @@ impl Plugin for Mangle {
                 self.apply_event(ev, &gate_sync);
                 next_event = context.next_event();
             }
-            let seg_end =
-                segment_end(off, next_event.map(|e| e.timing() as usize), block, CTRL_CHUNK);
+            let seg_end = segment_end(
+                off,
+                next_event.map(|e| e.timing() as usize),
+                block,
+                CTRL_CHUNK,
+            );
             let n = seg_end - off;
             let dt = n as f32 / self.sample_rate;
             for chunk in eng_chunk.iter_mut() {
@@ -882,10 +947,14 @@ impl Plugin for Mangle {
                 let mut loop_pos_l = [0.0f32; 3];
                 let mut loop_pos_r = [0.0f32; 3];
                 self.scratch_l.values.clear();
-                self.scratch_l.values.extend_from_slice(&self.scratch_v.values);
+                self.scratch_l
+                    .values
+                    .extend_from_slice(&self.scratch_v.values);
                 apply_voice(&mut self.scratch_l, rows, &sv, 0, &mut loop_pos_l);
                 self.scratch_r.values.clear();
-                self.scratch_r.values.extend_from_slice(&self.scratch_v.values);
+                self.scratch_r
+                    .values
+                    .extend_from_slice(&self.scratch_v.values);
                 apply_voice(&mut self.scratch_r, rows, &sv, 1, &mut loop_pos_r);
 
                 let note = voice.note as f32 + voice.tuning;
@@ -893,9 +962,17 @@ impl Plugin for Mangle {
                 // gain plus a balance pan (center = unity, so a voice with no
                 // expression is untouched), applied to each lane's level.
                 let expr_gl = voice.expr_volume
-                    * if voice.expr_pan > 0.0 { 1.0 - voice.expr_pan } else { 1.0 };
+                    * if voice.expr_pan > 0.0 {
+                        1.0 - voice.expr_pan
+                    } else {
+                        1.0
+                    };
                 let expr_gr = voice.expr_volume
-                    * if voice.expr_pan < 0.0 { 1.0 + voice.expr_pan } else { 1.0 };
+                    * if voice.expr_pan < 0.0 {
+                        1.0 + voice.expr_pan
+                    } else {
+                        1.0
+                    };
                 for e in 0..3usize {
                     let (mut lane_l, _) = resolve::lane_params(
                         &self.scratch_l,
@@ -957,8 +1034,7 @@ impl Plugin for Mangle {
                     // Always drain the lane's spawn counter so it can't go
                     // stale; the accumulator is only published while the
                     // editor is open.
-                    spawn_acc[e] =
-                        spawn_acc[e].saturating_add(voice.lanes[e].take_spawned());
+                    spawn_acc[e] = spawn_acc[e].saturating_add(voice.lanes[e].take_spawned());
                     if feed_open && seg_end == block {
                         // Cursor/mode snapshot from the block's final chunk;
                         // with several sounding voices the last one wins
@@ -1088,8 +1164,7 @@ impl Plugin for Mangle {
                     if !voice.sounding() || filled >= ef.grains.len() {
                         continue;
                     }
-                    filled +=
-                        voice.lanes[e].report_grains(&self.bank, &mut ef.grains[filled..]);
+                    filled += voice.lanes[e].report_grains(&self.bank, &mut ef.grains[filled..]);
                 }
                 ef.n_grains = filled as u8;
             }
@@ -1098,8 +1173,7 @@ impl Plugin for Mangle {
                 if spawn_acc[e] > 0 {
                     self.params.feed.spawns[e].fetch_add(spawn_acc[e], Ordering::Relaxed);
                 }
-                self.params.feed.level_bits[e]
-                    .fetch_max(eng_peak[e].to_bits(), Ordering::Relaxed);
+                self.params.feed.level_bits[e].fetch_max(eng_peak[e].to_bits(), Ordering::Relaxed);
             }
             if let Ok(mut f) = self.params.feed.frame.try_lock() {
                 *f = ff;
@@ -1122,8 +1196,10 @@ impl ClapPlugin for Mangle {
         ClapFeature::Stereo,
     ];
     // API: lets hosts stream per-note modulation to the PN-flagged params.
-    const CLAP_POLY_MODULATION_CONFIG: Option<PolyModulationConfig> =
-        Some(PolyModulationConfig { max_voice_capacity: 16, supports_overlapping_voices: true });
+    const CLAP_POLY_MODULATION_CONFIG: Option<PolyModulationConfig> = Some(PolyModulationConfig {
+        max_voice_capacity: 16,
+        supports_overlapping_voices: true,
+    });
 }
 
 nih_export_clap!(Mangle);
@@ -1173,7 +1249,10 @@ mod tests {
             assert_eq!(w[0].1, w[1].0, "gap/overlap between segments");
         }
         for &t in &[10usize, 75, 199] {
-            assert!(segs.iter().any(|&(s, _)| s == t), "event {t} not a segment boundary");
+            assert!(
+                segs.iter().any(|&(s, _)| s == t),
+                "event {t} not a segment boundary"
+            );
         }
     }
 }
