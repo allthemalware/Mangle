@@ -2,6 +2,7 @@
 //! short-lived worker thread, then hand the result to the audio thread through
 //! `MangleParams::pending_loads`. Nothing here runs on the audio thread.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -41,7 +42,12 @@ pub struct LoadState {
     /// its generation is still the latest (newest request wins).
     pub generation: [AtomicU64; 6],
     pub status: Mutex<[SlotStatus; 6]>,
+    /// Recent load notes for the editor's status line (newest last, at most
+    /// `MAX_MESSAGES`): decode warnings and failed multi-drop files.
+    pub messages: Mutex<VecDeque<String>>,
 }
+
+const MAX_MESSAGES: usize = 16;
 
 /// A decoded, display-ready sample.
 pub struct Decoded {
@@ -55,6 +61,15 @@ pub struct Decoded {
 fn set_status(params: &MangleParams, slot: usize, status: SlotStatus) {
     if let Ok(mut s) = params.loads.status.lock() {
         s[slot] = status;
+    }
+}
+
+fn push_message(params: &MangleParams, msg: String) {
+    if let Ok(mut m) = params.loads.messages.lock() {
+        while m.len() >= MAX_MESSAGES {
+            m.pop_front();
+        }
+        m.push_back(msg);
     }
 }
 
@@ -111,7 +126,7 @@ pub fn publish(params: &MangleParams, slot: usize, generation: u64, decoded: Dec
         path,
         content_hash,
         summary,
-        warnings: _,
+        warnings,
     } = decoded;
 
     // Hold the queue lock across the final staleness check and the push so a
@@ -143,7 +158,30 @@ pub fn publish(params: &MangleParams, slot: usize, generation: u64, decoded: Dec
     });
     drop(queue);
     set_status(params, slot, SlotStatus::Loaded);
+    for w in warnings {
+        push_message(params, format!("slot {}: {w}", slot + 1));
+    }
     true
+}
+
+fn source_name(source: &LoadSource) -> String {
+    let path = match source {
+        LoadSource::File(p) => p.to_string_lossy(),
+        LoadSource::Embedded { path, .. } => std::borrow::Cow::Borrowed(path.as_str()),
+    };
+    std::path::Path::new(path.as_ref())
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.into_owned())
+}
+
+fn status_message(source: &LoadSource, status: &SlotStatus) -> String {
+    let err = match status {
+        SlotStatus::Missing(_) => "file not found".to_string(),
+        SlotStatus::Failed(m) => m.clone(),
+        _ => String::new(),
+    };
+    format!("{}: {err}", source_name(source))
 }
 
 fn load_and_publish(params: &MangleParams, slot: usize, generation: u64, source: &LoadSource) {
@@ -154,6 +192,7 @@ fn load_and_publish(params: &MangleParams, slot: usize, generation: u64, source:
         }
         Err(status) => {
             if params.loads.generation[slot].load(Ordering::Acquire) == generation {
+                push_message(params, status_message(source, &status));
                 set_status(params, slot, status);
             }
         }
@@ -179,9 +218,8 @@ pub fn spawn_load(params: Arc<MangleParams>, slot: usize, source: LoadSource) {
 }
 
 /// Torsion multi-drop on one worker: load `paths` in order into successive slots
-/// from `start`; a failed file does not consume a slot (its error is recorded on
-/// the slot it would have filled, without disturbing that slot's sample);
-/// stops after slot 6.
+/// from `start`; a failed file does not consume a slot and touches no slot
+/// status (its error goes to `LoadState::messages`); stops after slot 6.
 pub fn spawn_multi_load(params: Arc<MangleParams>, start: usize, paths: Vec<PathBuf>) {
     let _ = std::thread::Builder::new()
         .name("mangle-load".into())
@@ -199,7 +237,7 @@ pub fn spawn_multi_load(params: Arc<MangleParams>, start: usize, paths: Vec<Path
                         publish(&params, slot, generation, decoded);
                         slot += 1;
                     }
-                    Err(status) => set_status(&params, slot, status),
+                    Err(status) => push_message(&params, status_message(&source, &status)),
                 }
             }
         });
@@ -333,6 +371,19 @@ mod tests {
         assert_eq!(queued(&params, 2), 1);
         assert_eq!(queued(&params, 3), 0);
         assert!(params.extra.read().unwrap().slot_refs[3].is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn multi_load_failure_goes_to_messages_not_status() {
+        let dir = tmp_dir("msgs");
+        let params = Arc::new(MangleParams::new());
+        spawn_multi_load(params.clone(), 0, vec![dir.join("gone.wav")]);
+        let have = |p: &MangleParams| !p.loads.messages.lock().unwrap().is_empty();
+        assert!(wait_for(|| have(&params)));
+        let msg = params.loads.messages.lock().unwrap().back().cloned();
+        assert!(msg.unwrap().starts_with("gone.wav: "));
+        assert_eq!(status(&params, 0), SlotStatus::Empty);
         let _ = std::fs::remove_dir_all(dir);
     }
 

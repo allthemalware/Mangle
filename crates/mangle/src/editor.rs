@@ -18,6 +18,7 @@
 //! `API:` comments mark the egui / nih_plug_egui call sites most likely to
 //! need a touch-up against a given checkout (see BUILD_NOTES.md).
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -33,7 +34,8 @@ use mangle_dsp::params::{pid, Module, Patch, GRAIN_MODE_IDX, N_GRAIN_MODES};
 use mangle_dsp::random::{randomize, RandomOptions};
 
 use crate::feed::FeedFrame;
-use crate::{MangleParams, PSlot, PendingLoad};
+use crate::loading::{self, LoadSource, SlotStatus};
+use crate::{MangleParams, PSlot};
 
 // ------------------------------------------------------------ palette ---
 
@@ -216,52 +218,6 @@ fn entropy_seed() -> u64 {
         .unwrap_or(0x9E37_79B9_7F4A_7C15)
 }
 
-/// Load a dropped/selected file into `slot`: decode + resample happen here
-/// on the GUI thread, then the result is queued for the audio thread to
-/// swap into the bank. Returns a short status string for display.
-fn load_into_slot(params: &MangleParams, slot: usize, path: &std::path::Path) -> String {
-    use std::sync::atomic::Ordering;
-    let sr = f32::from_bits(params.sr_bits.load(Ordering::Acquire));
-    match mangle_loader::load_sample(path, sr) {
-        Ok(loaded) => {
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("?")
-                .to_string();
-            let path_str = path.to_string_lossy().into_owned();
-            // Compute the waveform summary and update the display/slot-ref state
-            // here on the GUI thread so the audio-thread drain never allocates or
-            // takes a blocking lock.
-            let summary = crate::summarize(&loaded.slot);
-            if let Ok(mut w) = params.waveforms.write() {
-                w[slot.min(5)] = Some(summary.clone());
-            }
-            if let Ok(mut st) = params.extra.write() {
-                st.slot_refs[slot.min(5)] = Some(mangle_dsp::state::SlotRef {
-                    path: path_str.clone(),
-                    content_hash: loaded.content_hash,
-                });
-            }
-            params.extra_gen.fetch_add(1, Ordering::Release);
-            if let Ok(mut q) = params.pending_loads.lock() {
-                // Replace any queued load already targeting this slot.
-                q.retain(|p| p.slot != slot);
-                q.push(PendingLoad {
-                    slot,
-                    sample: Box::new(loaded.slot),
-                    path: path_str,
-                    content_hash: loaded.content_hash,
-                    summary,
-                    consumed: false,
-                });
-            }
-            format!("slot {} \u{2190} {}", slot + 1, name)
-        }
-        Err(e) => format!("load failed: {e}"),
-    }
-}
-
 /// Open a native file picker for `slot` on a dedicated thread (never blocks
 /// the GUI render), pushing the chosen path back to `dialog_results`. The
 /// editor polls that queue each frame. `params` is the same Arc the editor
@@ -291,18 +247,16 @@ fn open_file_dialog(params: &Arc<MangleParams>, slot: usize) {
     });
 }
 
-/// Drain any completed file-dialog selections and load them. Call once per
-/// frame from the editor; returns a status string if anything loaded.
-fn poll_dialog_results(params: &Arc<MangleParams>) -> Option<String> {
+/// Drain completed file-dialog selections and start a background load for
+/// each. Call once per frame from the editor.
+fn poll_dialog_results(params: &Arc<MangleParams>) {
     let picks: Vec<(usize, std::path::PathBuf)> = match params.dialog_results.lock() {
         Ok(mut q) if !q.is_empty() => q.drain(..).collect(),
-        _ => return None,
+        _ => return,
     };
-    let mut status = None;
     for (slot, path) in picks {
-        status = Some(load_into_slot(params, slot, &path));
+        loading::spawn_load(params.clone(), slot.min(5), LoadSource::File(path));
     }
-    status
 }
 
 // ------------------------------------------------------------ widgets ---
@@ -439,10 +393,15 @@ fn cell(ui: &mut Ui, setter: &ParamSetter, c: &CellParam, label: &str, w: f32) {
 
 /// Terminal button. Returns the response; paints accent when `active`.
 fn tbtn(ui: &mut Ui, label: &str, active: bool, w: f32) -> egui::Response {
+    tbtn_tinted(ui, label, active, w, false)
+}
+
+/// `tbtn` with the label drawn in the accent colour when `flag` is set.
+fn tbtn_tinted(ui: &mut Ui, label: &str, active: bool, w: f32, flag: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(w, CELL_H), Sense::click());
     fill(ui, rect, if active { ACCENT_FAINT } else { HEADER });
     frame(ui, rect, if active { ACCENT } else { BORDER });
-    let c = if active {
+    let c = if active || flag {
         ACCENT
     } else if resp.hovered() {
         BRIGHT
@@ -558,8 +517,13 @@ struct UiState {
     /// Last-frame screen rects of the curve canvas and the preset thumbnails.
     curve_rect: Option<Rect>,
     thumb_rects: Vec<Rect>,
-    /// Transient status line (drop results, etc.).
-    status: String,
+    /// Per-slot load status, last copy read from `params.loads.status`.
+    slot_status: [SlotStatus; 6],
+    /// Newest entry of `params.loads.messages` (kept when a try_lock misses).
+    last_message: String,
+    /// Working copy of the shared extra state and the `extra_gen` it was read at.
+    extra: mangle_dsp::state::ExtraState,
+    extra_gen: u64,
     /// Slot a hovered file-drop would land in (for highlight).
     drop_target: Option<usize>,
     /// Last engine-activity frame copied from the audio thread's feed
@@ -583,12 +547,30 @@ fn draw_editor(
     params: &Arc<MangleParams>,
     st: &mut UiState,
 ) {
-    // Work on a copy of the extra state; write back once if edited.
-    let mut ex = match params.extra.read() {
-        Ok(g) => g.clone(),
-        Err(_) => return,
-    };
+    // Work on the cached copy of the extra state; it is re-read only when
+    // another writer bumped `extra_gen`, and only GUI-owned fields go back.
+    let gen = params.extra_gen.load(Ordering::Acquire);
+    if gen != st.extra_gen {
+        match params.extra.read() {
+            Ok(g) => {
+                st.extra = g.clone();
+                st.extra_gen = gen;
+            }
+            Err(_) => return,
+        }
+    }
+    let mut ex = std::mem::take(&mut st.extra);
     let mut ex_changed = false;
+
+    if let Ok(s) = params.loads.status.try_lock() {
+        st.slot_status = s.clone();
+    }
+    if let Ok(m) = params.loads.messages.try_lock() {
+        st.last_message = m.back().cloned().unwrap_or_default();
+    }
+    if st.slot_status.contains(&SlotStatus::Loading) {
+        ctx.request_repaint();
+    }
 
     // Latest engine-activity frame for the overlay/lanes displays; on
     // try_lock contention just keep the previous copy.
@@ -612,25 +594,16 @@ fn draw_editor(
     });
     if !dropped.is_empty() {
         let start = st.drop_target.unwrap_or(st.selected_slot).min(5);
-        let mut last = String::new();
-        for (slot, path) in (start..).zip(&dropped) {
-            if slot > 5 {
-                break;
-            }
-            last = load_into_slot(params, slot, path);
-        }
+        loading::spawn_multi_load(params.clone(), start, dropped);
         st.selected_slot = start;
-        st.status = last;
         st.drop_target = None;
     } else if !hovering && st.loop_drag.is_none() {
         st.drop_target = None;
     }
 
-    // Completed file-picker selections (from the per-slot LOAD buttons) load
-    // here, on the GUI thread, same path as drops.
-    if let Some(status) = poll_dialog_results(params) {
-        st.status = status;
-    }
+    // Completed file-picker selections (from the per-slot LOAD buttons) start
+    // background loads, same as drops.
+    poll_dialog_results(params);
     // Reclaim loads the audio thread consumed: each entry now carries the
     // previous slot contents, which must be freed here — the audio thread
     // never deallocates. (While the editor is closed they just sit in the
@@ -693,12 +666,24 @@ fn draw_editor(
         });
 
     if ex_changed {
-        if let Ok(mut w) = params.extra.write() {
-            *w = ex;
+        match params.extra.write() {
+            Ok(mut w) if params.extra_gen.load(Ordering::Acquire) == st.extra_gen => {
+                w.curves = ex.curves.clone();
+                w.locks = ex.locks.clone();
+                w.random_amount = ex.random_amount;
+                w.random_complexity = ex.random_complexity;
+                w.last_seed = ex.last_seed;
+                w.pools = ex.pools.clone();
+                w.slot_views = ex.slot_views;
+                w.embed_samples = ex.embed_samples;
+                st.extra_gen = params.extra_gen.fetch_add(1, Ordering::Release) + 1;
+                st.extra = ex;
+            }
+            // Someone else wrote since we read: drop this edit and re-read.
+            _ => st.extra_gen = 0,
         }
-        params
-            .extra_gen
-            .fetch_add(1, std::sync::atomic::Ordering::Release);
+    } else {
+        st.extra = ex;
     }
 
     // ~30 Hz tick so the realtime displays animate without input events.
@@ -982,6 +967,16 @@ fn copy_grain(params: &MangleParams, setter: &ParamSetter, from: u8, to: u8) {
 
 // ------------------------------------------------------------ waveform ---
 
+/// Status text for the selected slot; falls back to the newest load message.
+fn status_line(state: &SlotStatus, message: &str) -> String {
+    match state {
+        SlotStatus::Loading => "loading\u{2026}".into(),
+        SlotStatus::Missing(p) => format!("missing: {p} \u{2014} LOAD to relink"),
+        SlotStatus::Failed(m) => format!("failed: {m}"),
+        _ => message.to_string(),
+    }
+}
+
 fn waveform_strip(
     ui: &mut Ui,
     setter: &ParamSetter,
@@ -1151,12 +1146,18 @@ fn waveform_strip(
                 .ok()
                 .map(|w| w[i].is_some())
                 .unwrap_or(false);
-            let label = if loaded {
+            let state = &st.slot_status[i];
+            let flag = matches!(state, SlotStatus::Missing(_) | SlotStatus::Failed(_));
+            let label = if *state == SlotStatus::Loading {
+                format!("{}\u{2026}", i + 1)
+            } else if flag {
+                format!("{}!", i + 1)
+            } else if loaded {
                 format!("[{}]", i + 1)
             } else {
                 format!(" {} ", i + 1)
             };
-            let r = tbtn(ui, &label, i == sel, 34.0);
+            let r = tbtn_tinted(ui, &label, i == sel, 34.0, flag);
             if r.clicked() {
                 st.selected_slot = i;
             }
@@ -1207,13 +1208,14 @@ fn waveform_strip(
         ui.add_space(8.0);
         section_label(ui, "LOOP.POINTS");
         lock_btn(ui, &mut ex.locks.loop_points, ex_changed);
-        if !st.status.is_empty() {
+        let line = status_line(&st.slot_status[sel], &st.last_message);
+        if !line.is_empty() {
             ui.add_space(10.0);
             txt(
                 ui,
                 Pos2::new(ui.cursor().left() + 4.0, ui.cursor().top() + CELL_H * 0.5),
                 Align2::LEFT_CENTER,
-                &st.status,
+                &line,
                 10.0,
                 ACCENT,
             );
@@ -2088,30 +2090,38 @@ mod gui_tests {
             "hovering files should target the selected slot"
         );
 
-        // Drop two files: they land in successive slots from the target, the
-        // decoded samples sit in the queue for the audio thread, and the
-        // target highlight clears.
-        frame(&mut st, &[], &[&wav_a, &wav_b], vec![]);
-        {
+        // Drop two files plus a missing one: the frame returns without
+        // decoding, the files land in successive slots from the target (the
+        // missing path doesn't consume a slot), and the highlight clears.
+        let missing = dir.join("mangle_dnd_missing.wav");
+        let started = std::time::Instant::now();
+        frame(&mut st, &[], &[&wav_a, &missing, &wav_b], vec![]);
+        let queued = |params: &MangleParams| -> Vec<usize> {
             let q = params.pending_loads.lock().unwrap();
-            let slots: Vec<usize> = q.iter().map(|p| p.slot).collect();
-            assert_eq!(
-                slots,
-                vec![2, 3],
-                "dropped files should queue into successive slots"
-            );
             assert!(q.iter().all(|p| !p.consumed));
+            let mut v: Vec<usize> = q.iter().map(|p| p.slot).collect();
+            v.sort_unstable();
+            v
+        };
+        let end = started + std::time::Duration::from_secs(5);
+        while queued(&params).len() < 2 && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        assert_eq!(
+            queued(&params),
+            vec![2, 3],
+            "dropped files should queue into successive slots"
+        );
         assert_eq!(
             st.selected_slot, 2,
             "the first dropped slot becomes selected"
         );
         assert_eq!(st.drop_target, None);
-        assert!(!st.status.is_empty(), "a drop should surface a status line");
+        frame(&mut st, &[], &[], vec![]);
         assert!(
-            !st.status.contains("failed"),
-            "load should succeed, got status: {}",
-            st.status
+            st.last_message.contains("mangle_dnd_missing.wav"),
+            "a failed file should surface a message, got: {:?}",
+            st.last_message
         );
 
         // Hover with the pointer over a slot tab: that tab becomes the target
@@ -2204,6 +2214,62 @@ mod gui_tests {
             let want = v0 + (v1 - v0) * (i - i0) as f32 / (i1 - i0) as f32;
             assert!((c.0[i] - want).abs() < 1e-4, "not linear at {i}");
         }
+    }
+
+    /// A GUI edit must not overwrite slot references written by a loader.
+    #[test]
+    fn slot_refs_survive_gui_writeback() {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState::default();
+        let mut time = 0.0;
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+
+        params.extra.write().unwrap().slot_refs[0] = Some(mangle_dsp::state::SlotRef {
+            path: "kept.wav".into(),
+            content_hash: 7,
+        });
+        params.extra_gen.fetch_add(1, Ordering::Release);
+
+        // Calibrate the slot row's y by clicking tab 2 until it is selected.
+        let mut y = 0.0;
+        for yy in (10..300).step_by(3) {
+            let mut ev = Vec::new();
+            click(&mut ev, 4.0 + 42.0 + 17.0, yy as f32);
+            curve_frame(&ctx, &setter, &params, &mut st, &mut time, ev);
+            if st.selected_slot == 1 {
+                y = yy as f32;
+                break;
+            }
+        }
+        assert!(y > 0.0, "slot row not found");
+        // Sweep clicks along the row (past LOAD) until the loop-points lock
+        // toggles.
+        let mut toggled = false;
+        let mut x = 340.0;
+        while x < 880.0 && !toggled {
+            let mut ev = Vec::new();
+            click(&mut ev, x, y);
+            curve_frame(&ctx, &setter, &params, &mut st, &mut time, ev);
+            toggled = params.extra.read().unwrap().locks.loop_points;
+            x += 3.0;
+        }
+        assert!(toggled, "no click reached the loop-points lock");
+        let ex = params.extra.read().unwrap();
+        assert_eq!(ex.slot_refs[0].as_ref().map(|r| r.content_hash), Some(7));
+        drop(ex);
+
+        // A write that lands after the editor read makes it drop its edit.
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        params.extra_gen.fetch_add(1, Ordering::Release);
+        st.extra.locks.loop_points = false;
+        let mut ev = Vec::new();
+        click(&mut ev, x - 3.0, y);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, ev);
+        assert!(params.extra.read().unwrap().slot_refs[0].is_some());
     }
 
     #[test]
