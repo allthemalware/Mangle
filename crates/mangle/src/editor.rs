@@ -31,7 +31,7 @@ use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind,
 use mangle_dsp::curve::{Curve, N_PRESETS};
 use mangle_dsp::engine::GrainMode;
 use mangle_dsp::matrix;
-use mangle_dsp::params::{pid, Module, Patch, GRAIN_MODE_IDX, N_GRAIN_MODES};
+use mangle_dsp::params::{pid, Module, Patch, GRAIN_MODE_IDX, LFO_TRIG_IDX, N_GRAIN_MODES};
 use mangle_dsp::random::{randomize, RandomOptions, RandomPools, SourcePool};
 
 use crate::feed::FeedFrame;
@@ -515,6 +515,11 @@ struct UiState {
     quant: usize,
     /// Preset-bank thumbnails, built once on first use.
     presets: Vec<Curve>,
+    /// Patch captured just before the last RND roll (UNDO RND / REROLL).
+    pre_roll: Option<Patch>,
+    /// UI time each momentary TRIG button stays lit until (Loop LFO 0..3,
+    /// then LFO 0..6).
+    trig_flash: [f64; 9],
     /// Last-frame screen rects of the curve canvas and the preset thumbnails.
     curve_rect: Option<Rect>,
     thumb_rects: Vec<Rect>,
@@ -653,7 +658,7 @@ fn draw_editor(
                 ui.set_min_width(MIN_CONTENT_W);
                 match st.tab {
                     Tab::Engines => engines_page(ui, setter, params, st, &mut ex, &mut ex_changed),
-                    Tab::Mod => lfo_and_friends(ui, setter, params, &mut ex, &mut ex_changed),
+                    Tab::Mod => lfo_and_friends(ui, setter, params, st, &mut ex, &mut ex_changed),
                     Tab::Matrix => {
                         // Cutoff/Reso are matrix destinations, so the filter
                         // row keeps its seat just above the grid.
@@ -716,7 +721,7 @@ fn header_bar(
     ctx: &egui::Context,
     setter: &ParamSetter,
     params: &MangleParams,
-    _st: &mut UiState,
+    st: &mut UiState,
     ex: &mut mangle_dsp::state::ExtraState,
     ex_changed: &mut bool,
 ) {
@@ -750,13 +755,19 @@ fn header_bar(
                         );
                         cell(ui, setter, &params.cp(Module::Global, 0, 4), "LEVEL", 104.0);
                         cell(ui, setter, &params.cp(Module::Global, 0, 5), "VOICES", 86.0);
+                        let drone = params.cp(Module::Global, 0, 0).norm() >= 0.5
+                            && params.cp(Module::Global, 0, 1).norm() <= 0.0;
+                        if drone {
+                            let (r, _) = ui.allocate_exact_size(vec2(52.0, CELL_H), Sense::hover());
+                            txt(ui, r.center(), Align2::CENTER_CENTER, "DRONE", 9.0, DIM);
+                        }
                         ui.add_space(12.0);
 
                         // RANDOM die: click = roll, right-click = settings.
                         let rnd = tbtn(ui, "\u{2684} RND", false, 64.0); // ⚄
                         if rnd.clicked() {
                             let seed = entropy_seed();
-                            roll_random(params, setter, ex, seed);
+                            roll_random(params, setter, st, ex, seed, None);
                             ex.last_seed = seed;
                             *ex_changed = true;
                         }
@@ -791,11 +802,22 @@ fn header_bar(
                         ui.menu_button("TOOLS", |ui| {
                             if ui.button("INIT PATCH").clicked() {
                                 apply_patch(params, setter, &Patch::init(&params.table));
+                                ex.curves = mangle_dsp::state::ExtraState::default().curves;
+                                *ex_changed = true;
+                                ui.close_menu();
+                            }
+                            let can_undo = st.pre_roll.is_some();
+                            if ui
+                                .add_enabled(can_undo, egui::Button::new("UNDO RND"))
+                                .clicked()
+                            {
+                                undo_roll(params, setter, st);
                                 ui.close_menu();
                             }
                             if ui.button("REROLL LAST SEED").clicked() {
                                 let seed = ex.last_seed;
-                                roll_random(params, setter, ex, seed);
+                                let base = st.pre_roll.clone();
+                                roll_random(params, setter, st, ex, seed, base);
                                 ui.close_menu();
                             }
                             ui.separator();
@@ -803,6 +825,9 @@ fn header_bar(
                                 (0u8, 1u8, "COPY G1 \u{2192} G2"),
                                 (0, 2, "COPY G1 \u{2192} G3"),
                                 (1, 2, "COPY G2 \u{2192} G3"),
+                                (1, 0, "COPY G2 \u{2192} G1"),
+                                (2, 0, "COPY G3 \u{2192} G1"),
+                                (2, 1, "COPY G3 \u{2192} G2"),
                             ] {
                                 if ui.button(label).clicked() {
                                     copy_grain(params, setter, a, b);
@@ -1025,11 +1050,16 @@ fn random_pool_menu(ui: &mut Ui, params: &MangleParams, pools: &mut RandomPools)
     changed
 }
 
+/// Randomize from `base` (the current patch when `None`), remembering `base`
+/// so the roll can be undone or reproduced. Held notes keep sounding and
+/// morph into the new patch.
 fn roll_random(
     params: &MangleParams,
     setter: &ParamSetter,
+    st: &mut UiState,
     ex: &mangle_dsp::state::ExtraState,
     seed: u64,
+    base: Option<Patch>,
 ) {
     let opts = RandomOptions::with_pools(
         ex.random_amount,
@@ -1037,14 +1067,37 @@ fn roll_random(
         ex.locks.clone(),
         &ex.pools,
     );
-    let mut patch = read_patch(params);
+    let base = base.unwrap_or_else(|| read_patch(params));
+    let mut patch = base.clone();
+    st.pre_roll = Some(base);
     randomize(&mut patch, &params.table, &opts, seed);
     apply_patch(params, setter, &patch);
-    // Ask the audio thread to hard-stop all voices so no grains/notes hang
-    // over the new patch.
+}
+
+/// Restore the patch captured before the last roll.
+fn undo_roll(params: &MangleParams, setter: &ParamSetter, st: &mut UiState) {
+    if let Some(patch) = st.pre_roll.take() {
+        apply_patch(params, setter, &patch);
+    }
+}
+
+/// Momentary trigger button: lit for ~150 ms after a click. Returns true on
+/// the frame it is clicked.
+fn trig_button(ui: &mut Ui, flash_until: &mut f64, w: f32) -> bool {
+    let now = ui.input(|i| i.time);
+    let r = tbtn(ui, "TRIG", now < *flash_until, w);
+    if r.clicked() {
+        *flash_until = now + 0.15;
+        true
+    } else {
+        false
+    }
+}
+
+fn request_lfo_trig(params: &MangleParams, bit: usize) {
     params
-        .panic
-        .store(true, std::sync::atomic::Ordering::Release);
+        .lfo_trig_requests
+        .fetch_or(1 << bit, std::sync::atomic::Ordering::AcqRel);
 }
 
 fn copy_grain(params: &MangleParams, setter: &ParamSetter, from: u8, to: u8) {
@@ -1456,6 +1509,12 @@ fn engines_page(
             for pair in LFO_GRID.chunks(2) {
                 ui.horizontal(|ui| {
                     for (idx, label) in pair {
+                        if *idx == LFO_TRIG_IDX {
+                            if trig_button(ui, &mut st.trig_flash[eng], cw) {
+                                request_lfo_trig(params, eng);
+                            }
+                            continue;
+                        }
                         cell(
                             ui,
                             setter,
@@ -1476,6 +1535,7 @@ fn lfo_and_friends(
     ui: &mut Ui,
     setter: &ParamSetter,
     params: &MangleParams,
+    st: &mut UiState,
     ex: &mut mangle_dsp::state::ExtraState,
     ex_changed: &mut bool,
 ) {
@@ -1521,6 +1581,12 @@ fn lfo_and_friends(
                     );
                     lock_btn(ui, &mut ex.locks.lfo[l], ex_changed);
                     for (idx, _) in LFO_GRID.iter() {
+                        if *idx == LFO_TRIG_IDX {
+                            if trig_button(ui, &mut st.trig_flash[3 + l], cw) {
+                                request_lfo_trig(params, 3 + l);
+                            }
+                            continue;
+                        }
                         cell_nolabel(ui, setter, &params.cp(Module::Lfo, l as u8, *idx), cw);
                     }
                 });
@@ -1807,7 +1873,7 @@ fn curves_screen(
         }
     });
 
-    // Preset bank: thumbnails only, built once.
+    // Preset bank: thumbnails are cached; a curve is built only on click.
     if st.presets.is_empty() {
         st.presets = (0..N_PRESETS).map(Curve::preset).collect();
     }
@@ -1820,7 +1886,7 @@ fn curves_screen(
         .max_height(th * 3.0 + GAP * 4.0)
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                for c in st.presets.iter() {
+                for (pi, c) in st.presets.iter().enumerate() {
                     let (r, tresp) = ui.allocate_exact_size(vec2(tw, th), Sense::click());
                     fill(ui, r, HEADER);
                     frame(ui, r, if tresp.hovered() { ACCENT } else { BORDER });
@@ -1836,7 +1902,7 @@ fn curves_screen(
                     ui.painter()
                         .add(egui::Shape::line(pts, Stroke::new(1.0_f32, ACCENT)));
                     if tresp.clicked() {
-                        ex.curves[sel] = c.clone();
+                        ex.curves[sel] = Curve::preset(pi);
                         *ex_changed = true;
                     }
                     st.thumb_rects.push(r);
@@ -1877,6 +1943,8 @@ mod gui_tests {
         begins: AtomicU32,
         sets: AtomicU32,
         ends: AtomicU32,
+        set_log: std::sync::Mutex<Vec<(ParamPtr, f32)>>,
+        begin_log: std::sync::Mutex<Vec<ParamPtr>>,
     }
     impl GuiContext for TestHost {
         fn plugin_api(&self) -> PluginApi {
@@ -1885,11 +1953,13 @@ mod gui_tests {
         fn request_resize(&self) -> bool {
             true
         }
-        unsafe fn raw_begin_set_parameter(&self, _p: ParamPtr) {
+        unsafe fn raw_begin_set_parameter(&self, p: ParamPtr) {
             self.begins.fetch_add(1, Ordering::Relaxed);
+            self.begin_log.lock().unwrap().push(p);
         }
-        unsafe fn raw_set_parameter_normalized(&self, _p: ParamPtr, _v: f32) {
+        unsafe fn raw_set_parameter_normalized(&self, p: ParamPtr, v: f32) {
             self.sets.fetch_add(1, Ordering::Relaxed);
+            self.set_log.lock().unwrap().push((p, v));
         }
         unsafe fn raw_end_set_parameter(&self, _p: ParamPtr) {
             self.ends.fetch_add(1, Ordering::Relaxed);
@@ -2450,5 +2520,78 @@ mod gui_tests {
         curve_frame(&ctx, &setter, &params, &mut st, &mut time, ev);
         let c = params.extra.read().unwrap().curves[2].clone();
         assert_eq!(c.0, Curve::preset(want).0);
+    }
+
+    #[test]
+    fn rnd_keeps_notes_and_undo_restores_pre_roll() {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let mut st = UiState::default();
+        let before = read_patch(&params);
+        let ex = params.extra.read().unwrap().clone();
+        roll_random(&params, &setter, &mut st, &ex, 7, None);
+        assert!(!params.panic.load(Ordering::Acquire));
+        assert_eq!(st.pre_roll.as_ref(), Some(&before));
+        assert!(host.sets.load(Ordering::Relaxed) > 0);
+
+        // The harness does not apply sets, so stage a distinct pre-roll and
+        // check UNDO writes exactly its values back and clears it.
+        let pos = params.slots.len() / 2;
+        let mut staged = before.clone();
+        staged.values[pos] = if before.values[pos] > 0.5 { 0.0 } else { 1.0 };
+        st.pre_roll = Some(staged.clone());
+        host.set_log.lock().unwrap().clear();
+        undo_roll(&params, &setter, &mut st);
+        assert!(st.pre_roll.is_none());
+        let log = host.set_log.lock().unwrap();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].1, staged.values[pos]);
+    }
+
+    #[test]
+    fn lfo_trig_cell_sets_request_bit_without_param_gesture() {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState {
+            tab: Tab::Mod,
+            ..Default::default()
+        };
+        let mut time = 0.0;
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        curve_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        let trig_ptrs: Vec<ParamPtr> = (0..6u8)
+            .map(|l| {
+                let pos = params.table.pos(pid(Module::Lfo, l, LFO_TRIG_IDX));
+                match params.slots[pos] {
+                    PSlot::B(i) => params.bools[i].as_ptr(),
+                    _ => panic!("Trig is a bool"),
+                }
+            })
+            .collect();
+        // Sweep a click grid over the body; every hit on a TRIG cell must
+        // raise only LFO bits (3..9) and never gesture the Trig param.
+        let mut seen = 0u32;
+        'scan: for gx in 0..88 {
+            for gy in 0..45 {
+                st.tab = Tab::Mod; // stray clicks may hit the tab bar
+                let mut ev = Vec::new();
+                click(&mut ev, 10.0 + gx as f32 * 10.0, 40.0 + gy as f32 * 8.0);
+                curve_frame(&ctx, &setter, &params, &mut st, &mut time, ev);
+                seen |= params.lfo_trig_requests.fetch_and(0, Ordering::AcqRel);
+                if seen != 0 {
+                    break 'scan;
+                }
+            }
+        }
+        assert_ne!(seen & 0b1_1111_1000, 0, "no LFO trig cell was hit");
+        assert!(host
+            .begin_log
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|p| !trig_ptrs.contains(p)));
     }
 }
