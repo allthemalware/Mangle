@@ -52,6 +52,7 @@ use mangle_dsp::voice::{Voice, VoiceManager};
 
 mod editor;
 pub mod feed;
+pub mod loading;
 
 use feed::{EngineFeed, FeedFrame};
 
@@ -127,6 +128,8 @@ pub struct MangleParams {
     /// the audio thread only while the editor is open; GUI-only, never
     /// serialized.
     pub feed: EngineFeed,
+    /// Background-load bookkeeping (generations + per-slot status).
+    pub loads: loading::LoadState,
 }
 
 fn group_name(info: &ParamInfo) -> String {
@@ -278,6 +281,7 @@ impl MangleParams {
                 AtomicBool::new(false),
             ],
             feed: EngineFeed::default(),
+            loads: loading::LoadState::default(),
         }
     }
 
