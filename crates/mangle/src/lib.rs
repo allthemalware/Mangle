@@ -419,6 +419,14 @@ pub struct Mangle {
     prev_lfo_trig: [bool; 6],
     rng: Rng,
     sample_rate: f32,
+    /// Path and content hash of what each bank slot holds (empty path = no
+    /// sample referenced), and the sample rate those samples were prepared at.
+    loaded: [(String, u64); 6],
+    loaded_rate: f32,
+    /// True from the first `process` call until `deactivate`.
+    processing: bool,
+    /// Instance seed the voices, global modulators and RNG were built from.
+    built_seed: u64,
 }
 
 impl Default for Mangle {
@@ -457,9 +465,21 @@ impl Default for Mangle {
             prev_lfo_trig: [false; 6],
             rng: Rng::new(0x564F_5944), // "VOYD"
             sample_rate: 48_000.0,
+            loaded: Default::default(),
+            loaded_rate: 0.0,
+            processing: false,
+            built_seed: 0,
             params,
         }
     }
+}
+
+/// SplitMix64 finalizer, to spread similar seeds apart.
+fn mix_seed(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 /// Build a min/max peak summary of a slot's mono mix for the GUI.
@@ -714,74 +734,17 @@ impl Plugin for Mangle {
     ) -> bool {
         self.prepare(buffer_config.sample_rate);
 
-        // Load referenced samples from state. `initialize` runs with the
-        // plugin deactivated, so blocking file IO + resampling is fine
-        // here; live (GUI-triggered) loads will use a background task +
-        // swap when the GUI lands.
-        let refs: Vec<(usize, String, u64)> = self
-            .params
-            .extra
-            .read()
-            .map(|st| {
-                st.slot_refs
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| r.as_ref().map(|r| (i, r.path.clone(), r.content_hash)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        for (i, path, expected) in refs {
-            match mangle_loader::load_sample(std::path::Path::new(&path), self.sample_rate) {
-                Ok(loaded) => {
-                    if expected != 0 && loaded.content_hash != expected {
-                        nih_log!(
-                            "Mangle: slot {} content hash mismatch for '{}' (file changed?)",
-                            i + 1,
-                            path
-                        );
-                    }
-                    for w in &loaded.warnings {
-                        nih_log!("Mangle: slot {}: {}", i + 1, w);
-                    }
-                    self.bank.slots[i] = Some(loaded.slot);
-                    self.refresh_waveform(i);
-                }
-                Err(e) => nih_log!("Mangle: slot {} load failed '{}': {}", i + 1, path, e),
-            }
-        }
-
-        // Dev hook until the GUI lands: MANGLE_SAMPLE=/path/to/file fills
-        // slot 1 and records the reference in state.
-        if self.bank.loaded().1 == 0 {
-            if let Ok(p) = std::env::var("MANGLE_SAMPLE") {
-                match mangle_loader::load_sample(std::path::Path::new(&p), self.sample_rate) {
-                    Ok(loaded) => {
-                        nih_log!("Mangle: loaded MANGLE_SAMPLE '{}'", p);
-                        if let Ok(mut st) = self.params.extra.write() {
-                            st.slot_refs[0] = Some(SlotRef {
-                                path: p.clone(),
-                                content_hash: loaded.content_hash,
-                            });
-                        }
-                        self.params.extra_gen.fetch_add(1, Ordering::Release);
-                        self.bank.slots[0] = Some(loaded.slot);
-                        self.refresh_waveform(0);
-                    }
-                    Err(e) => nih_log!("Mangle: MANGLE_SAMPLE failed: {}", e),
-                }
-            }
-        }
-
-        if self.bank.loaded().1 == 0 {
-            // Still empty: built-in fallback tone so the instrument sounds.
-            self.bank.slots[0] = Some(SampleSlot::test_tone(self.sample_rate));
-            self.refresh_waveform(0);
-        }
+        self.ensure_instance_seed();
+        self.sync_slots_with_state(!self.processing);
         nih_log!(
             "Mangle: {} host params generated from the table",
             self.params.table.len()
         );
         true
+    }
+
+    fn deactivate(&mut self) {
+        self.processing = false;
     }
 
     fn reset(&mut self) {
@@ -810,6 +773,7 @@ impl Plugin for Mangle {
                 pos_seconds: t.pos_seconds(),
             }
         };
+        self.processing = true;
         self.sync_gui_state();
 
         // 1. Host params → base patch.
@@ -869,6 +833,145 @@ impl Mangle {
         mangle_dsp::spectral::warm(); // pre-build the spectral FFT plan + window
     }
 
+    /// Assign `instance_seed` if unset, and rebuild the seeded voice, modulator
+    /// and RNG state when it differs from the one they were built with.
+    fn ensure_instance_seed(&mut self) {
+        let mut seed = self.params.extra.read().map_or(0, |st| st.instance_seed);
+        if seed == 0 {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64);
+            let addr = Arc::as_ptr(&self.params) as usize as u64;
+            seed = mix_seed(nanos ^ addr.rotate_left(32)).max(1);
+            if let Ok(mut st) = self.params.extra.write() {
+                st.instance_seed = seed;
+            }
+            self.params.extra_gen.fetch_add(1, Ordering::Release);
+        }
+        if seed != self.built_seed {
+            self.vm = VoiceManager::new(8, mix_seed(seed ^ 0x4D41_4E47));
+            self.gmod = GlobalMod::new(mix_seed(seed ^ 0x6D6F_6421));
+            self.rng = Rng::new(mix_seed(seed ^ 0x564F_5944));
+            self.built_seed = seed;
+        }
+    }
+
+    fn set_slot_status(&self, slot: usize, status: loading::SlotStatus) {
+        if let Ok(mut s) = self.params.loads.status.lock() {
+            s[slot] = status;
+        }
+    }
+
+    /// Empty a slot and cancel any load still in flight for it.
+    fn clear_slot(&mut self, i: usize) {
+        self.params.loads.generation[i].fetch_add(1, Ordering::AcqRel);
+        if let Ok(mut q) = self.params.pending_loads.lock() {
+            q.retain(|p| p.consumed || p.slot != i);
+        }
+        self.bank.slots[i] = None;
+        if let Ok(mut w) = self.params.waveforms.write() {
+            w[i] = None;
+        }
+        self.loaded[i] = (String::new(), 0);
+        self.set_slot_status(i, loading::SlotStatus::Empty);
+    }
+
+    /// Make the bank match `extra.slot_refs`: unchanged slots keep their
+    /// samples, unreferenced slots are cleared, changed ones are decoded here
+    /// (`cold`) or on a loader thread (hot reload while processing, so audio
+    /// is never stalled by file IO).
+    fn sync_slots_with_state(&mut self, cold: bool) {
+        if let Ok(mut q) = self.params.pending_loads.lock() {
+            q.retain(|p| !p.consumed);
+        }
+        let refs: Vec<Option<SlotRef>> = self
+            .params
+            .extra
+            .read()
+            .map(|st| st.slot_refs.to_vec())
+            .unwrap_or_default();
+        let mut any_ref = false;
+        for (i, r) in refs.iter().enumerate() {
+            let Some(r) = r else {
+                self.clear_slot(i);
+                continue;
+            };
+            any_ref = true;
+            if self.loaded[i].0 == r.path
+                && self.loaded[i].1 == r.content_hash
+                && self.loaded_rate == self.sample_rate
+            {
+                continue;
+            }
+            self.clear_slot(i);
+            let source = loading::LoadSource::File(std::path::PathBuf::from(&r.path));
+            if !cold {
+                self.set_slot_status(i, loading::SlotStatus::Loading);
+                loading::spawn_load(self.params.clone(), i, source);
+                continue;
+            }
+            match loading::decode(&source, self.sample_rate) {
+                Ok(d) => {
+                    if r.content_hash != 0 && d.content_hash != r.content_hash {
+                        nih_log!(
+                            "Mangle: slot {} content hash mismatch for '{}' (file changed?)",
+                            i + 1,
+                            r.path
+                        );
+                    }
+                    for w in &d.warnings {
+                        nih_log!("Mangle: slot {}: {}", i + 1, w);
+                    }
+                    self.bank.slots[i] = Some(d.sample);
+                    if let Ok(mut w) = self.params.waveforms.write() {
+                        w[i] = Some(d.summary);
+                    }
+                    self.loaded[i] = (d.path, d.content_hash);
+                    self.set_slot_status(i, loading::SlotStatus::Loaded);
+                }
+                Err(status) => {
+                    nih_log!(
+                        "Mangle: slot {} load failed '{}': {:?}",
+                        i + 1,
+                        r.path,
+                        status
+                    );
+                    self.set_slot_status(i, status);
+                }
+            }
+        }
+        self.loaded_rate = self.sample_rate;
+
+        if cold && !any_ref && self.bank.loaded().1 == 0 {
+            // Dev hook: MANGLE_SAMPLE=/path/to/file fills slot 1 and records
+            // the reference in state.
+            if let Ok(p) = std::env::var("MANGLE_SAMPLE") {
+                match mangle_loader::load_sample(std::path::Path::new(&p), self.sample_rate) {
+                    Ok(loaded) => {
+                        nih_log!("Mangle: loaded MANGLE_SAMPLE '{}'", p);
+                        if let Ok(mut st) = self.params.extra.write() {
+                            st.slot_refs[0] = Some(SlotRef {
+                                path: p.clone(),
+                                content_hash: loaded.content_hash,
+                            });
+                        }
+                        self.params.extra_gen.fetch_add(1, Ordering::Release);
+                        self.loaded[0] = (p, loaded.content_hash);
+                        self.bank.slots[0] = Some(loaded.slot);
+                        self.refresh_waveform(0);
+                        self.set_slot_status(0, loading::SlotStatus::Loaded);
+                    }
+                    Err(e) => nih_log!("Mangle: MANGLE_SAMPLE failed: {}", e),
+                }
+            }
+            if self.bank.loaded().1 == 0 {
+                // Still empty: built-in fallback tone so the instrument sounds.
+                self.bank.slots[0] = Some(SampleSlot::test_tone(self.sample_rate));
+                self.refresh_waveform(0);
+            }
+        }
+    }
+
     /// GUI → audio hand-offs done at the top of each block: curve sync and the
     /// pending-load swap.
     fn sync_gui_state(&mut self) {
@@ -904,6 +1007,8 @@ impl Mangle {
                 if let Some(old) = self.bank.slots[i].replace(new) {
                     *p.sample = old;
                 }
+                std::mem::swap(&mut self.loaded[i].0, &mut p.path);
+                std::mem::swap(&mut self.loaded[i].1, &mut p.content_hash);
                 p.consumed = true;
             }
         }
@@ -2003,5 +2108,158 @@ mod tests {
         let after = m.vm.voices[i].loop_lfos[0].running_phase;
         assert!(after < before, "{after} vs {before}");
         assert!(after < 0.05, "{after}");
+    }
+
+    fn write_test_wav(path: &std::path::Path, frames: usize) {
+        let mut data = Vec::new();
+        for i in 0..frames {
+            let v = ((i as f32 * 0.05).sin() * 12000.0) as i16;
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&48_000u32.to_le_bytes());
+        out.extend_from_slice(&96_000u32.to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&data);
+        std::fs::write(path, out).unwrap();
+    }
+
+    fn sync_dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("mangle-sync-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn set_ref(m: &Mangle, slot: usize, path: &std::path::Path, hash: u64) {
+        m.params.extra.write().unwrap().slot_refs[slot] = Some(SlotRef {
+            path: path.to_string_lossy().into_owned(),
+            content_hash: hash,
+        });
+    }
+
+    fn slot_status(m: &Mangle, slot: usize) -> loading::SlotStatus {
+        m.params.loads.status.lock().unwrap()[slot].clone()
+    }
+
+    #[test]
+    fn cold_sync_loads_refs_and_keeps_untouched_slots() {
+        let dir = sync_dir("cold");
+        let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+        write_test_wav(&a, 4800);
+        write_test_wav(&b, 2400);
+        let mut m = test_plugin();
+        set_ref(&m, 0, &a, 0);
+        set_ref(&m, 1, &b, 0);
+        m.sync_slots_with_state(true);
+        assert!(m.bank.slots[0].is_some() && m.bank.slots[1].is_some());
+        assert_eq!(slot_status(&m, 1), loading::SlotStatus::Loaded);
+        assert!(!m.loaded[1].0.is_empty() && m.loaded[1].1 != 0);
+
+        // The ref hashes are now unknown to the state; store the real ones.
+        let (h0, h1) = (m.loaded[0].1, m.loaded[1].1);
+        set_ref(&m, 0, &a, h0);
+        set_ref(&m, 1, &b, h1);
+        m.sync_slots_with_state(true);
+        let ptr = m.bank.slots[0].as_ref().unwrap().data[0].as_ptr();
+
+        m.params.extra.write().unwrap().slot_refs[1] = None;
+        m.sync_slots_with_state(true);
+        assert!(m.bank.slots[1].is_none());
+        assert!(m.loaded[1].0.is_empty());
+        assert_eq!(slot_status(&m, 1), loading::SlotStatus::Empty);
+        assert_eq!(m.bank.slots[0].as_ref().unwrap().data[0].as_ptr(), ptr);
+    }
+
+    #[test]
+    fn missing_file_leaves_slot_empty_and_keeps_ref() {
+        let dir = sync_dir("missing");
+        let mut m = test_plugin();
+        set_ref(&m, 2, &dir.join("nope.wav"), 7);
+        m.sync_slots_with_state(true);
+        assert!(m.bank.slots[2].is_none());
+        assert!(matches!(
+            slot_status(&m, 2),
+            loading::SlotStatus::Missing(_)
+        ));
+        assert!(m.params.extra.read().unwrap().slot_refs[2].is_some());
+    }
+
+    #[test]
+    fn hot_sync_clears_then_installs_through_pending_load() {
+        let dir = sync_dir("hot");
+        let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+        write_test_wav(&a, 4800);
+        write_test_wav(&b, 2400);
+        let mut m = test_plugin();
+        set_ref(&m, 0, &a, 0);
+        m.sync_slots_with_state(true);
+        let h = m.loaded[0].1;
+        set_ref(&m, 0, &b, 0);
+        m.sync_slots_with_state(false);
+        assert!(m.bank.slots[0].is_none());
+        assert!(m.loaded[0].0.is_empty());
+
+        let params = m.params.clone();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut queued = false;
+        while std::time::Instant::now() < end && !queued {
+            queued = params
+                .pending_loads
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|p| p.slot == 0 && !p.consumed);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(queued, "no pending load for slot 0");
+
+        m.sync_gui_state();
+        let mut l = vec![0.0f32; 64];
+        let mut r = vec![0.0f32; 64];
+        m.params.read_into(&mut m.base);
+        m.render_block(
+            &mut l,
+            &mut r,
+            BlockTransport::default(),
+            &mut Scripted::default(),
+        );
+        assert!(m.bank.slots[0].is_some());
+        assert_eq!(m.loaded[0].0, b.to_string_lossy());
+        assert_ne!(m.loaded[0].1, h);
+    }
+
+    #[test]
+    fn instance_seed_is_assigned_once_and_decorrelates_instances() {
+        let mut a = test_plugin();
+        let mut b = test_plugin();
+        a.ensure_instance_seed();
+        b.ensure_instance_seed();
+        let sa = a.params.extra.read().unwrap().instance_seed;
+        assert_ne!(sa, 0);
+        a.ensure_instance_seed();
+        assert_eq!(a.params.extra.read().unwrap().instance_seed, sa);
+
+        a.params.extra.write().unwrap().instance_seed = 1;
+        b.params.extra.write().unwrap().instance_seed = 2;
+        a.ensure_instance_seed();
+        b.ensure_instance_seed();
+        let va: Vec<f32> = (0..8).map(|_| a.rng.bipolar()).collect();
+        let vb: Vec<f32> = (0..8).map(|_| b.rng.bipolar()).collect();
+        assert_ne!(va, vb);
+
+        let mut c = test_plugin();
+        c.params.extra.write().unwrap().instance_seed = 1;
+        c.ensure_instance_seed();
+        let vc: Vec<f32> = (0..8).map(|_| c.rng.bipolar()).collect();
+        assert_eq!(va, vc);
     }
 }
