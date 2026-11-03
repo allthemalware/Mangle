@@ -10,6 +10,8 @@
 //! * drag a cell vertically = edit (Shift = fine) · scroll = step
 //! * click = toggle (bools) · Ctrl-click = reset to default / clear
 //! * padlock on a section header = exclude that unit from RANDOM
+//! * matrix: right-click Source/Scale/Dest for a picker menu; Dest also offers
+//!   PICK FROM CONTROL (then touch any destination control; Esc cancels)
 //! * RND = randomize (right-click for Amount / Complexity / seed / pools)
 //! * waveform: drag loop edges, drag the region body to move it
 //! * body tabs: ENGINES (one engine at a time) / MOD / MATRIX / CURVES
@@ -262,24 +264,53 @@ fn poll_dialog_results(params: &Arc<MangleParams>) {
 
 // ------------------------------------------------------------ widgets ---
 
-/// Like `cell` but with no inline label — used where a column header
-/// names the parameter (matrix-style layout). Identical interaction.
-fn cell_nolabel(ui: &mut Ui, setter: &ParamSetter, c: &CellParam, w: f32) {
-    cell(ui, setter, c, "", w);
-}
-
 /// One tracker cell: label left (dim), value right, level bar underneath.
 /// Drag vertical = edit (Shift fine), scroll = step, Ctrl-click = default,
 /// click toggles bools.
 fn cell(ui: &mut Ui, setter: &ParamSetter, c: &CellParam, label: &str, w: f32) {
+    cell_inner(ui, setter, c, label, w, false);
+}
+
+/// `cell` with an `inert` switch: when set the cell only paints and reports
+/// its response (used while a matrix destination is being picked). A drag that
+/// was swallowed by the picker stays inert until it is released.
+fn cell_inner(
+    ui: &mut Ui,
+    setter: &ParamSetter,
+    c: &CellParam,
+    label: &str,
+    w: f32,
+    inert: bool,
+) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(w, CELL_H), Sense::click_and_drag());
     let cur = c.norm();
-    let hovered = resp.hovered();
+    let swallowed: bool = ui.memory(|m| m.data.get_temp(resp.id)).unwrap_or(false);
+    if resp.drag_stopped() && swallowed {
+        ui.memory_mut(|m| m.data.remove::<bool>(resp.id));
+    }
+    let inert = inert || swallowed;
 
     // --- interaction -----------------------------------------------------
     let ctrl = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
     let fine = ui.input(|i| i.modifiers.shift);
 
+    if !inert {
+        cell_interact(ui, setter, c, &resp, cur, ctrl, fine);
+    }
+    cell_paint(ui, c, label, rect, &resp);
+    resp
+}
+
+fn cell_interact(
+    ui: &mut Ui,
+    setter: &ParamSetter,
+    c: &CellParam,
+    resp: &egui::Response,
+    cur: f32,
+    ctrl: bool,
+    fine: bool,
+) {
+    let hovered = resp.hovered();
     if resp.drag_started() {
         c.begin(setter);
         ui.memory_mut(|m| m.data.insert_temp(resp.id, cur));
@@ -335,7 +366,10 @@ fn cell(ui: &mut Ui, setter: &ParamSetter, c: &CellParam, label: &str, w: f32) {
             c.end(setter);
         }
     }
+}
 
+fn cell_paint(ui: &mut Ui, c: &CellParam, label: &str, rect: Rect, resp: &egui::Response) {
+    let hovered = resp.hovered();
     // --- paint -----------------------------------------------------------
     fill(ui, rect, if hovered { ACCENT_FAINT } else { HEADER });
     frame(ui, rect, BORDER);
@@ -504,6 +538,9 @@ struct UiState {
     /// ENGINES tab: which grain engine is shown (0..3).
     engine_page: usize,
     matrix_page: usize,
+    /// PICK FROM CONTROL is armed for this matrix (row, column): the next
+    /// destination control touched is assigned to that cell.
+    learn: Option<(u8, u8)>,
     selected_slot: usize,
     selected_curve: usize,
     loop_drag: Option<LoopDrag>,
@@ -568,6 +605,9 @@ fn draw_editor(
     let mut ex = std::mem::take(&mut st.extra);
     let mut ex_changed = false;
 
+    if st.learn.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        st.learn = None;
+    }
     if let Ok(s) = params.loads.status.try_lock() {
         st.slot_status = s.clone();
     }
@@ -662,7 +702,7 @@ fn draw_editor(
                     Tab::Matrix => {
                         // Cutoff/Reso are matrix destinations, so the filter
                         // row keeps its seat just above the grid.
-                        filter_panel(ui, setter, params);
+                        filter_panel(ui, setter, params, st);
                         ui.add_space(GAP * 2.0);
                         matrix_panel(ui, setter, params, st, &mut ex, &mut ex_changed);
                     }
@@ -1353,7 +1393,11 @@ fn waveform_strip(
         ui.add_space(8.0);
         section_label(ui, "LOOP.POINTS");
         lock_btn(ui, &mut ex.locks.loop_points, ex_changed);
-        let line = status_line(&st.slot_status[sel], &st.last_message);
+        let line = if st.learn.is_some() {
+            "touch a control\u{2026}".to_string()
+        } else {
+            status_line(&st.slot_status[sel], &st.last_message)
+        };
         if !line.is_empty() {
             ui.add_space(10.0);
             txt(
@@ -1486,8 +1530,18 @@ fn engines_page(
             for pair in GRAIN_GRID.chunks(2) {
                 ui.horizontal(|ui| {
                     for (idx, label) in pair {
-                        let cp = params.cp(Module::Grain, eng as u8, *idx);
-                        cell(ui, setter, &cp, mode_label(*idx, label, mode), cw);
+                        let label = mode_label(*idx, label, mode);
+                        cell_learn(
+                            ui,
+                            setter,
+                            params,
+                            st,
+                            Module::Grain,
+                            eng as u8,
+                            *idx,
+                            label,
+                            cw,
+                        );
                     }
                 });
             }
@@ -1515,10 +1569,14 @@ fn engines_page(
                             }
                             continue;
                         }
-                        cell(
+                        cell_learn(
                             ui,
                             setter,
-                            &params.cp(Module::LoopLfo, eng as u8, *idx),
+                            params,
+                            st,
+                            Module::LoopLfo,
+                            eng as u8,
+                            *idx,
                             label,
                             cw,
                         );
@@ -1587,7 +1645,7 @@ fn lfo_and_friends(
                             }
                             continue;
                         }
-                        cell_nolabel(ui, setter, &params.cp(Module::Lfo, l as u8, *idx), cw);
+                        cell_learn(ui, setter, params, st, Module::Lfo, l as u8, *idx, "", cw);
                     }
                 });
             }
@@ -1652,13 +1710,13 @@ fn lfo_and_friends(
 /// Master output filter (Module::Fx): On / Type / Cutoff / Reso. Cutoff and
 /// Reso are matrix destinations (Flt Cutoff / Flt Reso), so they sit just above
 /// the matrix.
-fn filter_panel(ui: &mut Ui, setter: &ParamSetter, params: &MangleParams) {
+fn filter_panel(ui: &mut Ui, setter: &ParamSetter, params: &MangleParams, st: &mut UiState) {
     ui.horizontal(|ui| {
         section_label(ui, "FILTER");
         cell(ui, setter, &params.cp(Module::Fx, 0, 0), "ON", 64.0);
         cell(ui, setter, &params.cp(Module::Fx, 0, 1), "TYPE", 84.0);
-        cell(ui, setter, &params.cp(Module::Fx, 0, 2), "CUTOFF", 116.0);
-        cell(ui, setter, &params.cp(Module::Fx, 0, 3), "RESO", 96.0);
+        cell_learn(ui, setter, params, st, Module::Fx, 0, 2, "CUTOFF", 116.0);
+        cell_learn(ui, setter, params, st, Module::Fx, 0, 3, "RESO", 96.0);
     });
 }
 
@@ -1684,7 +1742,7 @@ fn matrix_panel(
             ui,
             Pos2::new(ui.cursor().left() + 8.0, ui.cursor().top() + CELL_H * 0.5),
             Align2::LEFT_CENTER,
-            "ctrl-click clears a cell",
+            "ctrl-click clears · right-click picks",
             9.0,
             DIM,
         );
@@ -1698,15 +1756,231 @@ fn matrix_panel(
         ui.horizontal(|ui| {
             for (col, w) in widths.iter().enumerate() {
                 let label = if r == 0 { COLS[col] } else { "" };
-                cell(
-                    ui,
-                    setter,
-                    &params.cp(Module::Matrix, row, col as u8),
-                    label,
-                    *w,
-                );
+                matrix_cell(ui, setter, params, st, row, col as u8, label, *w);
             }
         });
+    }
+}
+
+/// One matrix grid cell. Source/Scale/Dest cells open a picker menu on
+/// right-click; while a destination pick is armed, clicking the armed cell
+/// cancels it and every other matrix cell is left untouched.
+#[allow(clippy::too_many_arguments)]
+fn matrix_cell(
+    ui: &mut Ui,
+    setter: &ParamSetter,
+    params: &MangleParams,
+    st: &mut UiState,
+    row: u8,
+    col: u8,
+    label: &str,
+    w: f32,
+) {
+    let cp = params.cp(Module::Matrix, row, col);
+    let armed = st.learn == Some((row, col));
+    let resp = cell_inner(ui, setter, &cp, label, w, st.learn.is_some());
+    if armed {
+        frame(ui, resp.rect, ACCENT);
+        if resp.clicked() {
+            st.learn = None;
+        }
+    }
+    match col {
+        0 | 5 => {
+            resp.context_menu(|ui| source_menu(ui, setter, &cp));
+        }
+        2 | 4 => {
+            resp.context_menu(|ui| dest_menu(ui, setter, &cp, &mut st.learn, (row, col)));
+        }
+        _ => {}
+    }
+}
+
+/// Write a stepped index param (`count` entries) through the host.
+fn set_index(setter: &ParamSetter, cp: &CellParam, idx: u16, count: u16) {
+    cp.begin(setter);
+    cp.set(setter, idx as f32 / (count - 1) as f32);
+    cp.end(setter);
+}
+
+fn index_of(cp: &CellParam, count: u16) -> u16 {
+    (cp.norm() * (count - 1) as f32).round() as u16
+}
+
+fn pick_item(ui: &mut Ui, selected: bool, label: &str) -> bool {
+    let hit = ui.selectable_label(selected, label).clicked();
+    if hit {
+        ui.close_menu();
+    }
+    hit
+}
+
+/// Source / Scale picker: every source, grouped.
+fn source_menu(ui: &mut Ui, setter: &ParamSetter, cp: &CellParam) {
+    const GROUPS: [(&str, std::ops::RangeInclusive<u16>); 7] = [
+        ("LFO 1\u{2013}6", 1..=6),
+        ("Loop 1\u{2013}3", 7..=9),
+        ("Drift", 10..=12),
+        ("Noise", 13..=15),
+        ("Macros", 16..=23),
+        ("Consts", 24..=27),
+        ("Env/Vel/Note/Oct/Gate/Press/VRand", 28..=34),
+    ];
+    let cur = index_of(cp, matrix::SOURCE_COUNT);
+    if pick_item(ui, cur == 0, &matrix::source_name(0)) {
+        set_index(setter, cp, 0, matrix::SOURCE_COUNT);
+    }
+    for (name, range) in GROUPS {
+        ui.menu_button(name, |ui| {
+            for i in range {
+                if pick_item(ui, cur == i, &matrix::source_name(i)) {
+                    set_index(setter, cp, i, matrix::SOURCE_COUNT);
+                }
+            }
+        });
+    }
+}
+
+/// Destination picker: grouped by owner, plus PICK FROM CONTROL.
+fn dest_menu(
+    ui: &mut Ui,
+    setter: &ParamSetter,
+    cp: &CellParam,
+    learn: &mut Option<(u8, u8)>,
+    cell_pos: (u8, u8),
+) {
+    use matrix::ModDest;
+    let cur = index_of(cp, matrix::DEST_COUNT);
+    if ui.button("PICK FROM CONTROL").clicked() {
+        *learn = Some(cell_pos);
+        ui.close_menu();
+    }
+    ui.separator();
+    if pick_item(ui, cur == 0, &matrix::dest_name(0)) {
+        set_index(setter, cp, 0, matrix::DEST_COUNT);
+    }
+    let owner = |ui: &mut Ui, title: String, dests: Vec<(String, ModDest)>| {
+        ui.menu_button(title, |ui| {
+            for (name, d) in dests {
+                let i = matrix::dest_to_index(d);
+                if pick_item(ui, cur == i, &name) {
+                    set_index(setter, cp, i, matrix::DEST_COUNT);
+                }
+            }
+        });
+    };
+    let lfo_items = |f: &dyn Fn(matrix::LfoDest) -> ModDest| -> Vec<(String, ModDest)> {
+        matrix::LFO_DESTS
+            .iter()
+            .map(|&s| (format!("{s:?}"), f(s)))
+            .collect()
+    };
+    for n in 0..6u8 {
+        owner(
+            ui,
+            format!("LFO {}", n + 1),
+            lfo_items(&|s| ModDest::Lfo(n, s)),
+        );
+    }
+    for n in 0..3u8 {
+        owner(
+            ui,
+            format!("Loop {}", n + 1),
+            lfo_items(&|s| ModDest::LoopLfo(n, s)),
+        );
+    }
+    for n in 0..3u8 {
+        let items = matrix::GRAIN_DESTS
+            .iter()
+            .map(|&s| (format!("{s:?}"), ModDest::Grain(n, s)))
+            .collect();
+        owner(ui, format!("G{}", n + 1), items);
+    }
+    let items = matrix::FX_DESTS
+        .iter()
+        .map(|&s| (format!("{s:?}"), ModDest::Fx(s)))
+        .collect();
+    owner(ui, "Filter".to_string(), items);
+}
+
+/// The matrix destination a cell drives, if it is one.
+fn cell_dest(module: Module, inst: u8, idx: u8) -> Option<matrix::ModDest> {
+    use matrix::{FxDest, GrainDest, LfoDest, ModDest};
+    let lfo = || match idx {
+        0 => Some(LfoDest::Gate),
+        5 => Some(LfoDest::Phase),
+        2 => Some(LfoDest::Rate),
+        7 => Some(LfoDest::Lag),
+        _ => None,
+    };
+    match module {
+        Module::Lfo => lfo().map(|s| ModDest::Lfo(inst, s)),
+        Module::LoopLfo => lfo().map(|s| ModDest::LoopLfo(inst, s)),
+        Module::Grain => {
+            let s = match idx {
+                1 => GrainDest::Rate,
+                6 => GrainDest::Length,
+                4 => GrainDest::Jitter,
+                12 => GrainDest::LoopSize,
+                10 => GrainDest::Position,
+                14 => GrainDest::Pitch,
+                16 => GrainDest::Direction,
+                17 => GrainDest::Shape,
+                18 => GrainDest::Skew,
+                8 => GrainDest::Level,
+                7 => GrainDest::Pan,
+                9 => GrainDest::Sample,
+                _ => return None,
+            };
+            Some(ModDest::Grain(inst, s))
+        }
+        Module::Fx => match idx {
+            2 => Some(ModDest::Fx(FxDest::Cutoff)),
+            3 => Some(ModDest::Fx(FxDest::Reso)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A `cell` that is also a matrix destination: while a pick is armed, the
+/// next click or drag start on it assigns the destination to the armed matrix
+/// cell instead of editing the control.
+#[allow(clippy::too_many_arguments)]
+fn cell_learn(
+    ui: &mut Ui,
+    setter: &ParamSetter,
+    params: &MangleParams,
+    st: &mut UiState,
+    module: Module,
+    inst: u8,
+    idx: u8,
+    label: &str,
+    w: f32,
+) {
+    let c = params.cp(module, inst, idx);
+    let dest = match (st.learn, cell_dest(module, inst, idx)) {
+        (Some(_), Some(d)) => d,
+        _ => {
+            cell_inner(ui, setter, &c, label, w, st.learn.is_some());
+            return;
+        }
+    };
+    let resp = cell_inner(ui, setter, &c, label, w, true);
+    let started = resp.drag_started();
+    if started || resp.clicked() {
+        if started {
+            ui.memory_mut(|m| m.data.insert_temp(resp.id, true));
+        }
+        if let Some((row, col)) = st.learn.take() {
+            let target = params.cp(Module::Matrix, row, col);
+            set_index(
+                setter,
+                &target,
+                matrix::dest_to_index(dest),
+                matrix::DEST_COUNT,
+            );
+        }
     }
 }
 
@@ -2593,5 +2867,170 @@ mod gui_tests {
             .unwrap()
             .iter()
             .all(|p| !trig_ptrs.contains(p)));
+    }
+
+    fn texts(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
+        match shape {
+            egui::Shape::Text(t) => {
+                let r = t.galley.rect.translate(t.pos.to_vec2());
+                out.push((t.galley.text().to_string(), r.center()));
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| texts(s, out)),
+            _ => {}
+        }
+    }
+
+    /// Run one frame and return the text of every painted label with its
+    /// centre, so tests can click widgets by what they say.
+    fn labels_frame(
+        ctx: &Context,
+        setter: &ParamSetter,
+        params: &Arc<MangleParams>,
+        st: &mut UiState,
+        time: &mut f64,
+        events: Vec<Event>,
+    ) -> Vec<(String, Pos2)> {
+        *time += 0.05;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 700.0))),
+            time: Some(*time),
+            events,
+            ..Default::default()
+        };
+        let out = ctx.run(input, |ctx| draw_editor(ctx, setter, params, st));
+        let mut v = Vec::new();
+        out.shapes.iter().for_each(|s| texts(&s.shape, &mut v));
+        v
+    }
+
+    fn find(labels: &[(String, Pos2)], text: &str) -> Pos2 {
+        labels
+            .iter()
+            .find(|(t, _)| t == text)
+            .unwrap_or_else(|| panic!("no label {text:?}"))
+            .1
+    }
+
+    fn right_click(ev: &mut Vec<Event>, pos: Pos2) {
+        ev.push(Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            ev.push(Event::PointerButton {
+                pos,
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::default(),
+            });
+        }
+    }
+
+    /// Click the label `text` currently on screen, then settle one frame.
+    fn click_label(
+        ctx: &Context,
+        setter: &ParamSetter,
+        params: &Arc<MangleParams>,
+        st: &mut UiState,
+        time: &mut f64,
+        text: &str,
+    ) {
+        let labels = labels_frame(ctx, setter, params, st, time, vec![]);
+        let at = find(&labels, text);
+        let mut ev = Vec::new();
+        click(&mut ev, at.x, at.y);
+        labels_frame(ctx, setter, params, st, time, ev);
+        labels_frame(ctx, setter, params, st, time, vec![]);
+    }
+
+    /// Right-click the label `text` and let the context menu open.
+    fn right_click_label(
+        ctx: &Context,
+        setter: &ParamSetter,
+        params: &Arc<MangleParams>,
+        st: &mut UiState,
+        time: &mut f64,
+        text: &str,
+    ) {
+        let labels = labels_frame(ctx, setter, params, st, time, vec![]);
+        let mut ev = Vec::new();
+        right_click(&mut ev, find(&labels, text));
+        labels_frame(ctx, setter, params, st, time, ev);
+        labels_frame(ctx, setter, params, st, time, vec![]);
+    }
+
+    /// Index last written to the row-1 matrix cell `col` through the host
+    /// (the harness host records sets but does not apply them).
+    fn matrix_index(host: &TestHost, params: &MangleParams, col: u8, count: u16) -> Option<u16> {
+        let pos = params.table.pos(pid(Module::Matrix, 0, col));
+        let ptr = match params.slots[pos] {
+            PSlot::I(i) => params.ints[i].as_ptr(),
+            _ => panic!("matrix source/dest are stepped"),
+        };
+        let log = host.set_log.lock().unwrap();
+        let (_, v) = log.iter().rev().find(|(p, _)| *p == ptr)?;
+        Some((v * (count - 1) as f32).round() as u16)
+    }
+
+    #[test]
+    fn pick_from_control_assigns_destination_without_touching_it() {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState {
+            tab: Tab::Matrix,
+            ..Default::default()
+        };
+        let mut time = 0.0;
+        labels_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        right_click_label(&ctx, &setter, &params, &mut st, &mut time, "DEST.1");
+        click_label(
+            &ctx,
+            &setter,
+            &params,
+            &mut st,
+            &mut time,
+            "PICK FROM CONTROL",
+        );
+        assert_eq!(st.learn, Some((0, 2)));
+        let labels = labels_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        assert!(labels.iter().any(|(t, _)| t == "touch a control\u{2026}"));
+
+        st.tab = Tab::Engines;
+        labels_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        click_label(&ctx, &setter, &params, &mut st, &mut time, "PITCH");
+
+        assert_eq!(st.learn, None);
+        let want = matrix::dest_to_index(matrix::ModDest::Grain(0, matrix::GrainDest::Pitch));
+        assert_eq!(
+            matrix_index(&host, &params, 2, matrix::DEST_COUNT),
+            Some(want)
+        );
+        let pos = params.table.pos(pid(Module::Grain, 0, 14));
+        let ptr = match params.slots[pos] {
+            PSlot::F(i) => params.floats[i].as_ptr(),
+            PSlot::I(i) => params.ints[i].as_ptr(),
+            PSlot::B(i) => params.bools[i].as_ptr(),
+        };
+        assert!(!host.begin_log.lock().unwrap().contains(&ptr));
+    }
+
+    #[test]
+    fn source_menu_sets_source_index() {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState {
+            tab: Tab::Matrix,
+            ..Default::default()
+        };
+        let mut time = 0.0;
+        labels_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        right_click_label(&ctx, &setter, &params, &mut st, &mut time, "SOURCE");
+        click_label(&ctx, &setter, &params, &mut st, &mut time, "LFO 1\u{2013}6");
+        click_label(&ctx, &setter, &params, &mut st, &mut time, "LFO 3");
+        assert_eq!(
+            matrix_index(&host, &params, 0, matrix::SOURCE_COUNT),
+            Some(3)
+        );
     }
 }
