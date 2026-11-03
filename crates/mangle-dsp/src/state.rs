@@ -5,16 +5,27 @@
 //! slot references. Serialized as a small versioned little-endian blob,
 //! hex-encoded into nih-plug's string-keyed field store by the shell.
 //!
-//! Format v1:
+//! Format v2 (v1 is the prefix up to and including the slot refs):
 //! ```text
 //! b"MNGL"  magic
-//! u16      version (1)
+//! u16      version (2)
 //! 9 × 256 × f32   curves (Loop 1–3, LFO 1–6)
 //! u32      lock bits (see ORDER below)
 //! f32      random amount
 //! f32      random complexity
 //! u64      last random seed
 //! 6 × slot ref: u8 present; if 1: u32 path len, utf-8 path, u64 hash
+//! -- appended in v2 --
+//! u64      instance seed (0 = not assigned yet)
+//! u32      grain pool bits
+//! u16      lfo pool bits
+//! u16      source pool bits
+//! u16      scale pool bits
+//! u16      dest grain bits
+//! u8       dest lfo bits
+//! u8       dest loop-lfo bits
+//! 6 × (f32 view start, f32 view end)  waveform zoom per slot
+//! u8       embed samples (0/1)
 //! ```
 //! The format is **append-only**: the fields above are a fixed prefix in every
 //! version, and later versions only append after them. `deserialize` therefore
@@ -26,10 +37,10 @@
 //! utility for tests and non-file hashing.
 
 use crate::curve::Curve;
-use crate::random::RandomLocks;
+use crate::random::{DestPool, GrainParamPool, LfoParamPool, RandomLocks, RandomPools, SourcePool};
 
 pub const MAGIC: [u8; 4] = *b"MNGL";
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SlotRef {
@@ -47,6 +58,13 @@ pub struct ExtraState {
     pub random_complexity: f32,
     pub last_seed: u64,
     pub slot_refs: [Option<SlotRef>; 6],
+    /// Per-instance random seed; 0 means not assigned yet.
+    pub instance_seed: u64,
+    pub pools: RandomPools,
+    /// Waveform zoom `(start, end)` per slot, as fractions of the sample.
+    pub slot_views: [(f32, f32); 6],
+    /// Store sample audio in the state instead of only referencing files.
+    pub embed_samples: bool,
 }
 
 impl Default for ExtraState {
@@ -68,6 +86,10 @@ impl Default for ExtraState {
             random_complexity: 0.6,
             last_seed: 0,
             slot_refs: [None, None, None, None, None, None],
+            instance_seed: 0,
+            pools: RandomPools::default(),
+            slot_views: [(0.0, 1.0); 6],
+            embed_samples: false,
         }
     }
 }
@@ -157,6 +179,20 @@ pub fn serialize(state: &ExtraState) -> Vec<u8> {
             }
         }
     }
+    out.extend_from_slice(&state.instance_seed.to_le_bytes());
+    out.extend_from_slice(&state.pools.grain.to_bits().to_le_bytes());
+    out.extend_from_slice(&state.pools.lfo.to_bits().to_le_bytes());
+    out.extend_from_slice(&state.pools.sources.to_bits().to_le_bytes());
+    out.extend_from_slice(&state.pools.scales.to_bits().to_le_bytes());
+    let (dg, dl, dll) = state.pools.dests.to_bits();
+    out.extend_from_slice(&dg.to_le_bytes());
+    out.push(dl);
+    out.push(dll);
+    for (s, e) in state.slot_views.iter() {
+        out.extend_from_slice(&s.to_le_bytes());
+        out.extend_from_slice(&e.to_le_bytes());
+    }
+    out.push(state.embed_samples as u8);
     out
 }
 
@@ -256,11 +292,23 @@ pub fn deserialize(data: &[u8]) -> Option<ExtraState> {
             }
         };
     }
-    // v2+ appended fields are read here, gated on `version` and defaulting when
-    // absent, e.g.:
-    //   if version >= 2 {
-    //       state.embed_samples = r.u8().map(|b| b != 0).unwrap_or(false);
-    //   }
+    if version >= 2 {
+        state.instance_seed = r.u64()?;
+        state.pools.grain = GrainParamPool::from_bits(r.u32()?);
+        state.pools.lfo = LfoParamPool::from_bits(r.u16()?);
+        state.pools.sources = SourcePool::from_bits(r.u16()?);
+        state.pools.scales = SourcePool::from_bits(r.u16()?);
+        let dg = r.u16()?;
+        let dl = r.u8()?;
+        let dll = r.u8()?;
+        state.pools.dests = DestPool::from_bits(dg, dl, dll);
+        for view in state.slot_views.iter_mut() {
+            let (s, e) = (r.f32()?, r.f32()?);
+            let valid = s.is_finite() && e.is_finite() && 0.0 <= s && s < e && e <= 1.0;
+            *view = if valid { (s, e) } else { (0.0, 1.0) };
+        }
+        state.embed_samples = r.u8()? != 0;
+    }
     Some(state)
 }
 
@@ -319,8 +367,25 @@ mod tests {
             content_hash: 12345,
         });
 
+        st.instance_seed = 0x0123_4567_89AB_CDEF;
+        st.pools.grain.0[0] = !st.pools.grain.0[0];
+        st.pools.lfo.0[3] = !st.pools.lfo.0[3];
+        st.pools.sources.noise = true;
+        st.pools.scales.key = true;
+        st.pools.dests.grain[0] = !st.pools.dests.grain[0];
+        st.pools.dests.lfo[0] = true;
+        st.pools.dests.loop_lfo[3] = true;
+        st.slot_views[1] = (0.25, 0.75);
+        st.slot_views[5] = (0.1, 0.2);
+        st.embed_samples = true;
+
         let bytes = serialize(&st);
         let back = deserialize(&bytes).expect("must deserialize");
+        assert_eq!(back.instance_seed, st.instance_seed);
+        assert_eq!(back.pools, st.pools);
+        assert_ne!(back.pools, RandomPools::default());
+        assert_eq!(back.slot_views, st.slot_views);
+        assert!(back.embed_samples);
         for (a, b) in st.curves.iter().zip(back.curves.iter()) {
             assert_eq!(a.0[..], b.0[..]);
         }
@@ -343,10 +408,10 @@ mod tests {
     }
 
     #[test]
-    fn loads_newer_version_keeping_the_v1_prefix() {
-        // A hypothetical future v2 blob: a valid v1 payload with the version
-        // bumped to 2 and extra trailing bytes (fields this code can't read).
-        // Every v1 field must still load; the trailing bytes are ignored.
+    fn loads_newer_version_keeping_the_known_prefix() {
+        // A hypothetical future v3 blob: a valid v2 payload with the version
+        // bumped to 3 and extra trailing bytes (fields this code can't read).
+        // Every v1 and v2 field must still load; the trailing bytes are ignored.
         let mut st = ExtraState::default();
         st.curves[3] = Curve::random_walk(9);
         st.locks.lfo[2] = true;
@@ -357,9 +422,14 @@ mod tests {
             content_hash: 99,
         });
 
+        st.instance_seed = 77;
+        st.pools.sources.key = true;
+        st.slot_views[0] = (0.5, 0.6);
+        st.embed_samples = true;
+
         let mut bytes = serialize(&st);
-        bytes[4] = 2; // version u16 (LE) low byte: 1 -> 2
-        bytes.extend_from_slice(&[0xAA; 16]); // appended "v2" data, unknown to us
+        bytes[4] = 3; // version u16 (LE) low byte: 2 -> 3
+        bytes.extend_from_slice(&[0xAA; 16]); // appended "v3" data, unknown to us
 
         let back = deserialize(&bytes).expect("a newer-version blob must still load");
         assert_eq!(back.curves[3].0[..], st.curves[3].0[..]);
@@ -367,6 +437,54 @@ mod tests {
         assert!((back.random_amount - 0.33).abs() < 1e-6);
         assert_eq!(back.last_seed, st.last_seed);
         assert_eq!(back.slot_refs[1], st.slot_refs[1]);
+        assert_eq!(back.instance_seed, 77);
+        assert_eq!(back.pools, st.pools);
+        assert_eq!(back.slot_views, st.slot_views);
+        assert!(back.embed_samples);
+    }
+
+    #[test]
+    fn v1_blob_loads_with_v2_defaults() {
+        let mut st = ExtraState {
+            last_seed: 5,
+            instance_seed: 9,
+            embed_samples: true,
+            ..Default::default()
+        };
+        st.slot_views[0] = (0.2, 0.3);
+        st.slot_refs[0] = Some(SlotRef {
+            path: "/a.wav".to_string(),
+            content_hash: 1,
+        });
+        let mut bytes = serialize(&st);
+        let v2_len = 8 + 4 + 2 + 2 + 2 + 2 + 1 + 1 + 6 * 8 + 1;
+        bytes.truncate(bytes.len() - v2_len);
+        bytes[4] = 1;
+        bytes[5] = 0;
+        let back = deserialize(&bytes).expect("v1 blob must load");
+        assert_eq!(back.last_seed, 5);
+        assert_eq!(back.slot_refs[0], st.slot_refs[0]);
+        assert_eq!(back.instance_seed, 0);
+        assert_eq!(back.pools, RandomPools::default());
+        assert_eq!(back.slot_views, [(0.0, 1.0); 6]);
+        assert!(!back.embed_samples);
+    }
+
+    #[test]
+    fn bad_views_sanitize_to_full_range() {
+        let st = ExtraState {
+            slot_views: [
+                (f32::NAN, 1.0),
+                (0.0, f32::INFINITY),
+                (0.5, 0.5),
+                (0.8, 0.2),
+                (-0.1, 0.5),
+                (0.2, 1.5),
+            ],
+            ..Default::default()
+        };
+        let back = deserialize(&serialize(&st)).unwrap();
+        assert_eq!(back.slot_views, [(0.0, 1.0); 6]);
     }
 
     #[test]

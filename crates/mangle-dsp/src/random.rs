@@ -55,8 +55,34 @@ impl Default for RandomLocks {
 }
 
 /// Which grain parameters are in the randomization pool (by index, §3 order).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GrainParamPool(pub [bool; N_GRAIN_PARAMS]);
+
+fn pack_bools(flags: &[bool]) -> u64 {
+    flags
+        .iter()
+        .enumerate()
+        .fold(0, |acc, (i, &b)| acc | ((b as u64) << i))
+}
+
+fn unpack_bools(bits: u64, out: &mut [bool]) {
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = bits & (1 << i) != 0;
+    }
+}
+
+impl GrainParamPool {
+    /// Bit i = parameter i (LSB first).
+    pub fn to_bits(&self) -> u32 {
+        pack_bools(&self.0) as u32
+    }
+
+    pub fn from_bits(bits: u32) -> Self {
+        let mut p = [false; N_GRAIN_PARAMS];
+        unpack_bools(bits as u64, &mut p);
+        Self(p)
+    }
+}
 
 impl Default for GrainParamPool {
     fn default() -> Self {
@@ -70,8 +96,21 @@ impl Default for GrainParamPool {
 }
 
 /// Which LFO / Loop LFO parameters are in the pool (by index, §4 order).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LfoParamPool(pub [bool; N_LFO_PARAMS]);
+
+impl LfoParamPool {
+    /// Bit i = parameter i (LSB first).
+    pub fn to_bits(&self) -> u16 {
+        pack_bools(&self.0) as u16
+    }
+
+    pub fn from_bits(bits: u16) -> Self {
+        let mut p = [false; N_LFO_PARAMS];
+        unpack_bools(bits as u64, &mut p);
+        Self(p)
+    }
+}
 
 impl Default for LfoParamPool {
     fn default() -> Self {
@@ -83,7 +122,7 @@ impl Default for LfoParamPool {
 }
 
 /// Which source families may appear in generated matrix rows.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SourcePool {
     pub lfo: bool,
     pub loop_lfo: bool,
@@ -118,6 +157,39 @@ impl Default for SourcePool {
 }
 
 impl SourcePool {
+    /// Bit i = field i in declaration order (LSB first).
+    pub fn to_bits(&self) -> u16 {
+        pack_bools(&[
+            self.lfo,
+            self.loop_lfo,
+            self.drift,
+            self.noise,
+            self.macros,
+            self.consts,
+            self.env_follow,
+            self.key,
+            self.pressure,
+            self.voice_random,
+        ]) as u16
+    }
+
+    pub fn from_bits(bits: u16) -> Self {
+        let mut f = [false; 10];
+        unpack_bools(bits as u64, &mut f);
+        Self {
+            lfo: f[0],
+            loop_lfo: f[1],
+            drift: f[2],
+            noise: f[3],
+            macros: f[4],
+            consts: f[5],
+            env_follow: f[6],
+            key: f[7],
+            pressure: f[8],
+            voice_random: f[9],
+        }
+    }
+
     fn admits(&self, s: ModSource) -> bool {
         match s {
             ModSource::None => false,
@@ -157,7 +229,7 @@ impl SourcePool {
 }
 
 /// Which destination kinds may appear in generated matrix rows.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DestPool {
     /// Indexed by `matrix::GRAIN_DESTS` order.
     pub grain: [bool; 14],
@@ -193,6 +265,27 @@ impl Default for DestPool {
 }
 
 impl DestPool {
+    /// `(grain, lfo, loop_lfo)` masks; bit i = element i (LSB first).
+    pub fn to_bits(&self) -> (u16, u8, u8) {
+        (
+            pack_bools(&self.grain) as u16,
+            pack_bools(&self.lfo) as u8,
+            pack_bools(&self.loop_lfo) as u8,
+        )
+    }
+
+    pub fn from_bits(grain: u16, lfo: u8, loop_lfo: u8) -> Self {
+        let mut d = Self {
+            grain: [false; 14],
+            lfo: [false; 4],
+            loop_lfo: [false; 4],
+        };
+        unpack_bools(grain as u64, &mut d.grain);
+        unpack_bools(lfo as u64, &mut d.lfo);
+        unpack_bools(loop_lfo as u64, &mut d.loop_lfo);
+        d
+    }
+
     /// Stepped-param indices of every admitted destination, excluding any
     /// destination owned by a locked unit.
     pub fn allowed(&self, locks: &RandomLocks) -> Vec<u16> {
@@ -222,6 +315,16 @@ impl DestPool {
             })
             .collect()
     }
+}
+
+/// The user-editable RANDOM pools, as persisted in the plugin state.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct RandomPools {
+    pub grain: GrainParamPool,
+    pub lfo: LfoParamPool,
+    pub sources: SourcePool,
+    pub dests: DestPool,
+    pub scales: SourcePool,
 }
 
 #[derive(Clone, Debug)]
@@ -257,6 +360,26 @@ impl Default for RandomOptions {
 }
 
 impl RandomOptions {
+    /// Options built from persisted settings; everything else is default.
+    pub fn with_pools(
+        amount: f32,
+        complexity: f32,
+        locks: RandomLocks,
+        pools: &RandomPools,
+    ) -> Self {
+        Self {
+            amount,
+            complexity,
+            locks,
+            grain_pool: pools.grain.clone(),
+            lfo_pool: pools.lfo.clone(),
+            sources: pools.sources.clone(),
+            dests: pools.dests.clone(),
+            scales: pools.scales.clone(),
+            max_matrix_rows: 16,
+        }
+    }
+
     /// May RANDOM touch this (non-matrix) parameter at all?
     fn candidate(&self, module: Module, instance: u8, index: u8) -> bool {
         let l = &self.locks;
@@ -396,6 +519,59 @@ mod tests {
             .filter(|(i, _)| (a.values[*i] - b.values[*i]).abs() > 1e-9)
             .map(|(_, p)| p.id)
             .collect()
+    }
+
+    #[test]
+    fn pool_bits_roundtrip() {
+        let g = GrainParamPool::default();
+        assert_eq!(GrainParamPool::from_bits(g.to_bits()), g);
+        let l = LfoParamPool::default();
+        assert_eq!(LfoParamPool::from_bits(l.to_bits()), l);
+        let s = SourcePool::default();
+        assert_eq!(SourcePool::from_bits(s.to_bits()), s);
+        let d = DestPool::default();
+        let (a, b, c) = d.to_bits();
+        assert_eq!(DestPool::from_bits(a, b, c), d);
+
+        for v in [false, true] {
+            let g = GrainParamPool([v; N_GRAIN_PARAMS]);
+            assert_eq!(g.to_bits(), if v { (1 << 22) - 1 } else { 0 });
+            assert_eq!(GrainParamPool::from_bits(g.to_bits()), g);
+            let l = LfoParamPool([v; N_LFO_PARAMS]);
+            assert_eq!(l.to_bits(), if v { (1 << 10) - 1 } else { 0 });
+            assert_eq!(LfoParamPool::from_bits(l.to_bits()), l);
+            let s = SourcePool::from_bits(if v { 0x3FF } else { 0 });
+            assert_eq!(s.lfo, v);
+            assert_eq!(s.voice_random, v);
+            assert_eq!(SourcePool::from_bits(s.to_bits()), s);
+            let d = DestPool {
+                grain: [v; 14],
+                lfo: [v; 4],
+                loop_lfo: [v; 4],
+            };
+            let (a, b, c) = d.to_bits();
+            assert_eq!((a, b, c), if v { (0x3FFF, 0xF, 0xF) } else { (0, 0, 0) });
+            assert_eq!(DestPool::from_bits(a, b, c), d);
+        }
+        assert!(SourcePool::from_bits(1).lfo);
+        assert!(SourcePool::from_bits(1 << 9).voice_random);
+    }
+
+    #[test]
+    fn with_pools_matches_default_options() {
+        let t = ParamTable::new();
+        let d = RandomOptions::default();
+        let o = RandomOptions::with_pools(
+            d.amount,
+            d.complexity,
+            RandomLocks::default(),
+            &RandomPools::default(),
+        );
+        let mut a = Patch::init(&t);
+        let mut b = Patch::init(&t);
+        randomize(&mut a, &t, &d, 0xBEEF);
+        randomize(&mut b, &t, &o, 0xBEEF);
+        assert_eq!(a, b);
     }
 
     #[test]
