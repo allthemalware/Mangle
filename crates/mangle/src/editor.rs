@@ -10,7 +10,7 @@
 //! * drag a cell vertically = edit (Shift = fine) · scroll = step
 //! * click = toggle (bools) · Ctrl-click = reset to default / clear
 //! * padlock on a section header = exclude that unit from RANDOM
-//! * RND = randomize (right-click for Amount / Complexity / seed)
+//! * RND = randomize (right-click for Amount / Complexity / seed / pools)
 //! * waveform: drag loop edges, drag the region body to move it
 //! * body tabs: ENGINES (one engine at a time) / MOD / MATRIX / CURVES
 //!   (freehand draw + presets + ops); header + waveform stay put
@@ -30,8 +30,9 @@ use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind,
 
 use mangle_dsp::curve::{Curve, N_PRESETS};
 use mangle_dsp::engine::GrainMode;
+use mangle_dsp::matrix;
 use mangle_dsp::params::{pid, Module, Patch, GRAIN_MODE_IDX, N_GRAIN_MODES};
-use mangle_dsp::random::{randomize, RandomOptions};
+use mangle_dsp::random::{randomize, RandomOptions, RandomPools, SourcePool};
 
 use crate::feed::FeedFrame;
 use crate::loading::{self, LoadSource, SlotStatus};
@@ -781,6 +782,10 @@ fn header_bar(
                             }
                             ui.label(format!("last seed {:016x}", ex.last_seed));
                             ui.label("padlocks on section headers = locks");
+                            ui.separator();
+                            if random_pool_menu(ui, params, &mut ex.pools) {
+                                *ex_changed = true;
+                            }
                         });
 
                         ui.menu_button("TOOLS", |ui| {
@@ -933,18 +938,105 @@ fn tab_bar(ui: &mut Ui, st: &mut UiState) {
     });
 }
 
+/// One checkbox per flag; true when any was toggled.
+fn pool_checks<'a>(ui: &mut Ui, flags: impl Iterator<Item = (String, &'a mut bool)>) -> bool {
+    let mut changed = false;
+    for (label, flag) in flags {
+        changed |= ui.checkbox(flag, label).changed();
+    }
+    changed
+}
+
+fn source_flags(p: &mut SourcePool) -> Vec<(String, &mut bool)> {
+    vec![
+        ("LFO".to_string(), &mut p.lfo),
+        ("Loop LFO".to_string(), &mut p.loop_lfo),
+        ("Drift".to_string(), &mut p.drift),
+        ("Noise".to_string(), &mut p.noise),
+        ("Macros".to_string(), &mut p.macros),
+        ("Consts".to_string(), &mut p.consts),
+        ("Env".to_string(), &mut p.env_follow),
+        ("Key (vel/note/oct/gate)".to_string(), &mut p.key),
+        ("Pressure".to_string(), &mut p.pressure),
+        ("Voice Random".to_string(), &mut p.voice_random),
+    ]
+}
+
+fn dest_names<'a, T: std::fmt::Debug>(
+    dests: &[T],
+    flags: &'a mut [bool],
+) -> Vec<(String, &'a mut bool)> {
+    dests
+        .iter()
+        .zip(flags.iter_mut())
+        .map(|(d, f)| (format!("{d:?}"), f))
+        .collect()
+}
+
+/// Collapsible RANDOM pool editor; true when the pools changed.
+fn random_pool_menu(ui: &mut Ui, params: &MangleParams, pools: &mut RandomPools) -> bool {
+    let mut changed = false;
+    let strip = |name: &str, prefix: &str| name.strip_prefix(prefix).unwrap_or(name).to_string();
+
+    egui::CollapsingHeader::new("GRAIN PARAMS").show(ui, |ui| {
+        let flags = pools.grain.0.iter_mut().enumerate().map(|(i, f)| {
+            let info = params.table.get(pid(Module::Grain, 0, i as u8));
+            (strip(&info.name, "Grain 1 "), f)
+        });
+        changed |= pool_checks(ui, flags);
+    });
+    egui::CollapsingHeader::new("LFO PARAMS").show(ui, |ui| {
+        let flags = pools.lfo.0.iter_mut().enumerate().map(|(i, f)| {
+            let info = params.table.get(pid(Module::Lfo, 0, i as u8));
+            (strip(&info.name, "LFO 1 "), f)
+        });
+        changed |= pool_checks(ui, flags);
+    });
+    egui::CollapsingHeader::new("SOURCES").show(ui, |ui| {
+        changed |= pool_checks(ui, source_flags(&mut pools.sources).into_iter());
+    });
+    egui::CollapsingHeader::new("SCALES").show(ui, |ui| {
+        changed |= pool_checks(ui, source_flags(&mut pools.scales).into_iter());
+    });
+    egui::CollapsingHeader::new("DESTINATIONS").show(ui, |ui| {
+        ui.label("Grain");
+        changed |= pool_checks(
+            ui,
+            dest_names(&matrix::GRAIN_DESTS, &mut pools.dests.grain).into_iter(),
+        );
+        ui.label("LFO");
+        changed |= pool_checks(
+            ui,
+            dest_names(&matrix::LFO_DESTS, &mut pools.dests.lfo).into_iter(),
+        );
+        ui.label("Loop LFO");
+        changed |= pool_checks(
+            ui,
+            dest_names(&matrix::LFO_DESTS, &mut pools.dests.loop_lfo).into_iter(),
+        );
+    });
+    if ui.button("DEFAULTS").clicked() {
+        let d = RandomPools::default();
+        if *pools != d {
+            *pools = d;
+            changed = true;
+        }
+    }
+    changed
+}
+
 fn roll_random(
     params: &MangleParams,
     setter: &ParamSetter,
     ex: &mangle_dsp::state::ExtraState,
     seed: u64,
 ) {
-    let opts = RandomOptions {
-        amount: ex.random_amount,
-        complexity: ex.random_complexity,
-        locks: ex.locks.clone(),
-        ..RandomOptions::default()
-    };
+    let opts = RandomOptions::with_pools(
+        ex.random_amount,
+        ex.random_complexity,
+        ex.locks.clone(),
+        &ex.pools,
+    );
     let mut patch = read_patch(params);
     randomize(&mut patch, &params.table, &opts, seed);
     apply_patch(params, setter, &patch);
@@ -2270,6 +2362,70 @@ mod gui_tests {
         click(&mut ev, x - 3.0, y);
         curve_frame(&ctx, &setter, &params, &mut st, &mut time, ev);
         assert!(params.extra.read().unwrap().slot_refs[0].is_some());
+    }
+
+    /// A pool checkbox toggled through the real context-menu input path
+    /// reaches the shared extra state.
+    #[test]
+    fn random_pool_checkbox_reaches_extra_state() {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState::default();
+        let mut time = 0.0f64;
+        let mut frame = |st: &mut UiState, events: Vec<Event>| {
+            time += 0.05;
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| draw_editor(ctx, &setter, &params, st));
+        };
+        let secondary = |ev: &mut Vec<Event>, x: f32, y: f32| {
+            let pos = Pos2::new(x, y);
+            ev.push(Event::PointerMoved(pos));
+            for pressed in [true, false] {
+                ev.push(Event::PointerButton {
+                    pos,
+                    button: PointerButton::Secondary,
+                    pressed,
+                    modifiers: Modifiers::default(),
+                });
+            }
+        };
+        frame(&mut st, vec![]);
+        frame(&mut st, vec![]);
+
+        // Open the RND menu: right-click along the header until a popup shows.
+        let mut x = 80.0;
+        while x < 1500.0 && !ctx.is_context_menu_open() {
+            let mut ev = Vec::new();
+            secondary(&mut ev, x, 14.0);
+            frame(&mut st, ev);
+            frame(&mut st, vec![]);
+            x += 6.0;
+        }
+        assert!(ctx.is_context_menu_open(), "RND menu not found");
+
+        // Sweep primary clicks over the menu: section headers expand, then a
+        // checkbox flips a pool flag.
+        let default = RandomPools::default();
+        'sweep: for pass in 0..6 {
+            for y in (20..880).step_by(5) {
+                let mut ev = Vec::new();
+                click(&mut ev, x - 6.0 + 20.0 + pass as f32, y as f32);
+                frame(&mut st, ev);
+                if params.extra.read().unwrap().pools != default {
+                    break 'sweep;
+                }
+            }
+        }
+        frame(&mut st, vec![]);
+        assert_ne!(params.extra.read().unwrap().pools, default);
+        assert_ne!(st.extra.pools, default);
     }
 
     #[test]
