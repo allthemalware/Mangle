@@ -200,14 +200,18 @@ impl MangleParams {
         for info in table.infos.iter() {
             match info.map {
                 Map::Bool => {
-                    bools.push(BoolParam::new(
-                        info.name.clone(),
-                        info.default_display >= 0.5,
-                    ));
+                    let mut p = BoolParam::new(info.name.clone(), info.default_display >= 0.5);
+                    if info.flags & flags::A == 0 {
+                        p = p.non_automatable();
+                    }
+                    if info.flags & flags::PN != 0 {
+                        p = p.with_poly_modulation_id(info.id);
+                    }
+                    bools.push(p);
                     slots.push(PSlot::B(bools.len() - 1));
                 }
                 Map::Steps { count } => {
-                    let p = IntParam::new(
+                    let mut p = IntParam::new(
                         info.name.clone(),
                         info.default_display as i32,
                         IntRange::Linear {
@@ -216,16 +220,28 @@ impl MangleParams {
                         },
                     )
                     .with_value_to_string(int_formatter(info));
+                    if info.flags & flags::A == 0 {
+                        p = p.non_automatable();
+                    }
+                    if info.flags & flags::PN != 0 {
+                        p = p.with_poly_modulation_id(info.id);
+                    }
                     ints.push(p);
                     slots.push(PSlot::I(ints.len() - 1));
                 }
                 Map::Int { min, max } => {
-                    let p = IntParam::new(
+                    let mut p = IntParam::new(
                         info.name.clone(),
                         info.default_display as i32,
                         IntRange::Linear { min, max },
                     )
                     .with_value_to_string(int_formatter(info));
+                    if info.flags & flags::A == 0 {
+                        p = p.non_automatable();
+                    }
+                    if info.flags & flags::PN != 0 {
+                        p = p.with_poly_modulation_id(info.id);
+                    }
                     ints.push(p);
                     slots.push(PSlot::I(ints.len() - 1));
                 }
@@ -253,8 +269,10 @@ impl MangleParams {
                             .and_then(|t| t.parse::<f32>().ok())
                             .map(|d| map.to_norm(d))
                     }));
+                    if info.flags & flags::A == 0 {
+                        p = p.non_automatable();
+                    }
                     if info.flags & flags::PN != 0 {
-                        // API: nih-plug poly modulation opt-in.
                         p = p.with_poly_modulation_id(info.id);
                     }
                     floats.push(p);
@@ -975,6 +993,7 @@ impl Mangle {
         // (see mangle-borrow-fallback.md). All fixed-size — no allocation.
         let feed_open = self.params.editor_state.is_open();
         let mut eng_chunk = [[[0.0f32; CTRL_CHUNK]; 2]; 3];
+        let mut voice_buf = [[0.0f32; CTRL_CHUNK]; 2];
         let mut eng_peak = [0.0f32; 3];
         let mut spawn_acc = [0u32; 3];
         let mut ff = FeedFrame::default();
@@ -1116,7 +1135,7 @@ impl Mangle {
                     voice.note as f32 + voice.tuning + self.bend[(voice.channel & 15) as usize];
                 // Note-expression Volume/Pan (parameter map §10): a per-voice
                 // gain plus a balance pan (center = unity, so a voice with no
-                // expression is untouched), applied to each lane's level.
+                // expression is untouched), applied to the voice's output.
                 let expr_gl = voice.expr_volume
                     * if voice.expr_pan > 0.0 {
                         1.0 - voice.expr_pan
@@ -1181,18 +1200,26 @@ impl Mangle {
                     );
                     lane_l.loop_pos = loop_pos_l[e];
                     lane_r.loop_pos = loop_pos_r[e];
-                    lane_l.level *= expr_gl;
-                    lane_r.level *= expr_gr;
-                    let [buf_l, buf_r] = &mut eng_chunk[e];
+                    // Each voice renders to its own scratch so the expression
+                    // gains apply to the voice output, after grain Pan.
+                    for ch in voice_buf.iter_mut() {
+                        ch[..n].fill(0.0);
+                    }
+                    let [vbuf_l, vbuf_r] = &mut voice_buf;
                     voice.lanes[e].process(
                         &[lane_l, lane_r],
                         &self.bank,
                         scan,
                         self.sample_rate,
-                        &mut buf_l[..n],
-                        &mut buf_r[..n],
+                        &mut vbuf_l[..n],
+                        &mut vbuf_r[..n],
                         n,
                     );
+                    let [buf_l, buf_r] = &mut eng_chunk[e];
+                    for i in 0..n {
+                        buf_l[i] += vbuf_l[i] * expr_gl;
+                        buf_r[i] += vbuf_r[i] * expr_gr;
+                    }
                     // Always drain the lane's spawn counter so it can't go
                     // stale; the accumulator is only published while the
                     // editor is open.
@@ -1601,6 +1628,80 @@ mod tests {
         m.base.values[on] = 1.0;
         m.base.values[ty] = 0.0;
         m.base.values[cut] = cutoff;
+    }
+
+    fn channel_rms(out: &[f32], bs: usize) -> (f32, f32) {
+        let (mut sl, mut sr, mut n) = (0.0f32, 0.0f32, 0usize);
+        for c in out.chunks(bs * 2) {
+            sl += c[..bs].iter().map(|s| s * s).sum::<f32>();
+            sr += c[bs..].iter().map(|s| s * s).sum::<f32>();
+            n += bs;
+        }
+        ((sl / n as f32).sqrt(), (sr / n as f32).sqrt())
+    }
+
+    #[test]
+    fn expression_pan_moves_the_voice_output() {
+        let run = |pan: f32| {
+            let mut m = test_plugin();
+            let mut io = Scripted::default();
+            io.input.push_back(note_on());
+            io.input.push_back(NoteEvent::PolyPan {
+                timing: 0,
+                voice_id: Some(5),
+                channel: 0,
+                note: 45,
+                pan,
+            });
+            let out = render_setup(&mut m, &mut io, 16384, 512, &|m| {
+                let p = m.params.table.pos(mp::pid(Module::Grain, 0, 7));
+                m.base.values[p] = 1.0; // grain Pan 100 % swaps the emitters
+            });
+            channel_rms(&out, 512)
+        };
+        let (l, r) = run(1.0);
+        assert!(r > 0.001, "right {r}");
+        assert!(l < 0.01 * r, "left {l} right {r}");
+        let (l, r) = run(-1.0);
+        assert!(l > 0.001, "left {l}");
+        assert!(r < 0.01 * l, "left {l} right {r}");
+    }
+
+    fn param_flags_and_poly_id(m: &Mangle, id: u32) -> (ParamFlags, Option<u32>) {
+        let pos = m.params.table.pos(id);
+        match m.params.slots[pos] {
+            PSlot::F(i) => (
+                m.params.floats[i].flags(),
+                m.params.floats[i].poly_modulation_id(),
+            ),
+            PSlot::I(i) => (
+                m.params.ints[i].flags(),
+                m.params.ints[i].poly_modulation_id(),
+            ),
+            PSlot::B(i) => (
+                m.params.bools[i].flags(),
+                m.params.bools[i].poly_modulation_id(),
+            ),
+        }
+    }
+
+    #[test]
+    fn host_flags_follow_the_table() {
+        let m = test_plugin();
+        let voices = mp::pid(Module::Global, 0, 5);
+        assert!(param_flags_and_poly_id(&m, voices)
+            .0
+            .contains(ParamFlags::NON_AUTOMATABLE));
+        let root = mp::pid(Module::Slot, 0, 0);
+        assert!(param_flags_and_poly_id(&m, root)
+            .0
+            .contains(ParamFlags::NON_AUTOMATABLE));
+        let gate = mp::pid(Module::Grain, 0, 0);
+        assert_eq!(param_flags_and_poly_id(&m, gate).1, Some(gate));
+        let lfo_rate = mp::pid(Module::Lfo, 0, 2);
+        assert_eq!(param_flags_and_poly_id(&m, lfo_rate).1, None);
+        let loop_rate = mp::pid(Module::LoopLfo, 0, 2);
+        assert_eq!(param_flags_and_poly_id(&m, loop_rate).1, Some(loop_rate));
     }
 
     #[test]

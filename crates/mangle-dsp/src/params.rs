@@ -398,9 +398,11 @@ pub const N_PITCH_QUANT: u16 = 8;
 /// (Grains, Stretch, Cloud, Spectral.)
 pub const N_GRAIN_MODES: u16 = 4;
 
-/// Shared by LFO 1–6 and Loop LFO 1–3 (only the Rate default differs).
+/// Shared by LFO 1–6 and Loop LFO 1–3 (the Rate default differs, and only
+/// Loop LFOs are per-voice, so only they take per-note modulation).
 fn lfo_specs(loop_lfo: bool) -> Vec<Spec> {
     let rate_default = if loop_lfo { 0.10 } else { 1.0 };
+    let pn = if loop_lfo { PN } else { 0 };
     vec![
         Spec("Gate", "", Map::Bool, 1.0, A | M | S, false), // 0
         Spec("Transport", "", Map::Bool, 0.0, A_S, false),  // 1
@@ -409,7 +411,7 @@ fn lfo_specs(loop_lfo: bool) -> Vec<Spec> {
             "Hz",
             Map::Cube { max: 50.0 },
             rate_default,
-            A_M_PN,
+            A | M | pn,
             false,
         ), // 2
         Spec("Rate Tempo", "", Map::Bool, 0.0, A_S, false), // 3
@@ -429,7 +431,7 @@ fn lfo_specs(loop_lfo: bool) -> Vec<Spec> {
                 max: 360.0,
             },
             0.0,
-            A_M_PN,
+            A | M | pn,
             false,
         ), // 5
         Spec(
@@ -454,7 +456,7 @@ fn lfo_specs(loop_lfo: bool) -> Vec<Spec> {
             A_M,
             false,
         ), // 7
-        Spec("Trig", "", Map::Bool, 0.0, A | PN | S, false), // 8 (edge-triggered)
+        Spec("Trig", "", Map::Bool, 0.0, A | pn | S, false), // 8 (edge-triggered)
         Spec("One-Shot", "", Map::Bool, 0.0, A_S, false),   // 9 [new] MSEG envelope mode
     ]
 }
@@ -829,6 +831,17 @@ mod tests {
         // 6 global + 8 macro + 3×22 grain + 3×10 loop-lfo + 6×10 lfo
         // + 3 drift + 3 noise + 6×4 slot + 32×6 matrix + 4 fx = 396.
         assert_eq!(ParamTable::new().len(), 396);
+    }
+
+    #[test]
+    fn only_loop_lfos_take_per_note_modulation() {
+        let t = ParamTable::new();
+        for idx in [2u8, 5, LFO_TRIG_IDX] {
+            let global = t.get(pid(Module::Lfo, 0, idx));
+            let looped = t.get(pid(Module::LoopLfo, 0, idx));
+            assert_eq!(global.flags & flags::PN, 0, "{}", global.name);
+            assert_ne!(looped.flags & flags::PN, 0, "{}", looped.name);
+        }
     }
 
     #[test]
