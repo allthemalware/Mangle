@@ -73,6 +73,11 @@ fn push_message(params: &MangleParams, msg: String) {
     }
 }
 
+/// Add a note to the editor's status messages.
+pub fn note(params: &MangleParams, msg: String) {
+    push_message(params, msg);
+}
+
 /// Decode on the calling thread (file or embedded bytes) at `target_rate`.
 /// A missing file maps to `SlotStatus::Missing(path)`, other errors to `Failed(msg)`.
 pub fn decode(source: &LoadSource, target_rate: f32) -> Result<Decoded, SlotStatus> {

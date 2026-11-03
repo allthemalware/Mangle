@@ -138,6 +138,22 @@ pub struct MangleParams {
     pub feed: EngineFeed,
     /// Background-load bookkeeping (generations + per-slot status).
     pub loads: loading::LoadState,
+    /// Original file bytes already read for embedding, per slot, keyed by
+    /// path + content hash; avoids re-reading files on every state save.
+    pub embed_cache: std::sync::Mutex<[Option<EmbedCacheEntry>; 6]>,
+    /// Samples found in a loaded preset (`mangle_embed_<slot>` keys).
+    pub(crate) embedded: std::sync::Mutex<[Option<EmbeddedSample>; 6]>,
+}
+
+/// (path, content hash, original file bytes).
+pub type EmbedCacheEntry = (String, u64, Arc<Vec<u8>>);
+
+/// Original file bytes carried inside a preset.
+#[derive(Clone)]
+pub(crate) struct EmbeddedSample {
+    pub ext: Option<String>,
+    pub hash: u64,
+    pub bytes: Arc<Vec<u8>>,
 }
 
 fn group_name(info: &ParamInfo) -> String {
@@ -309,6 +325,8 @@ impl MangleParams {
             ],
             feed: EngineFeed::default(),
             loads: loading::LoadState::default(),
+            embed_cache: std::sync::Mutex::new(Default::default()),
+            embedded: std::sync::Mutex::new(Default::default()),
         }
     }
 
@@ -335,6 +353,86 @@ impl MangleParams {
 impl Default for MangleParams {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl MangleParams {
+    /// Original bytes of the slot's referenced file, from the cache, the
+    /// embedded store or disk; only returned when they hash to the ref's hash.
+    fn embed_bytes(&self, slot: usize, r: &SlotRef) -> Option<Arc<Vec<u8>>> {
+        if let Ok(c) = self.embed_cache.lock() {
+            if let Some((p, h, b)) = &c[slot] {
+                if *p == r.path && *h == r.content_hash {
+                    return Some(b.clone());
+                }
+            }
+        }
+        let from_preset = self.embedded.lock().ok().and_then(|e| {
+            e[slot]
+                .as_ref()
+                .filter(|e| e.hash == r.content_hash)
+                .map(|e| e.bytes.clone())
+        });
+        let bytes = match from_preset {
+            Some(b) => b,
+            None => Arc::new(std::fs::read(&r.path).ok()?),
+        };
+        if mangle_loader::hash_bytes(&bytes) != r.content_hash {
+            return None;
+        }
+        if let Ok(mut c) = self.embed_cache.lock() {
+            c[slot] = Some((r.path.clone(), r.content_hash, bytes.clone()));
+        }
+        Some(bytes)
+    }
+
+    fn serialize_embedded(&self, map: &mut BTreeMap<String, String>) {
+        let Ok(st) = self.extra.read() else { return };
+        if !st.embed_samples {
+            return;
+        }
+        for (i, r) in st.slot_refs.iter().enumerate() {
+            let Some(r) = r else { continue };
+            let Some(bytes) = self.embed_bytes(i, r) else {
+                nih_log!(
+                    "Mangle: slot {} not embedded: '{}' unreadable or changed",
+                    i + 1,
+                    r.path
+                );
+                continue;
+            };
+            let ext = std::path::Path::new(&r.path)
+                .extension()
+                .map(|e| e.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            map.insert(
+                format!("mangle_embed_{i}"),
+                format!("{ext}:{}", mangle_loader::b64_encode(&bytes)),
+            );
+        }
+    }
+
+    fn deserialize_embedded(&self, serialized: &BTreeMap<String, String>) {
+        let mut found: [Option<EmbeddedSample>; 6] = Default::default();
+        for (i, entry) in found.iter_mut().enumerate() {
+            let Some((ext, b64)) = serialized
+                .get(&format!("mangle_embed_{i}"))
+                .and_then(|v| v.split_once(':'))
+            else {
+                continue;
+            };
+            let Some(bytes) = mangle_loader::b64_decode(b64) else {
+                continue;
+            };
+            *entry = Some(EmbeddedSample {
+                ext: (!ext.is_empty()).then(|| ext.to_string()),
+                hash: mangle_loader::hash_bytes(&bytes),
+                bytes: Arc::new(bytes),
+            });
+        }
+        if let Ok(mut e) = self.embedded.lock() {
+            *e = found;
+        }
     }
 }
 
@@ -367,10 +465,12 @@ unsafe impl Params for MangleParams {
                 state::hex_encode(&state::serialize(&st)),
             );
         }
+        self.serialize_embedded(&mut map);
         map
     }
 
     fn deserialize_fields(&self, serialized: &BTreeMap<String, String>) {
+        self.deserialize_embedded(serialized);
         if let Some(hex) = serialized.get("mangle_state") {
             if let Some(st) = state::hex_decode(hex).and_then(|b| state::deserialize(&b)) {
                 if let Ok(mut w) = self.extra.write() {
@@ -883,6 +983,27 @@ impl Mangle {
     /// samples, unreferenced slots are cleared, changed ones are decoded here
     /// (`cold`) or on a loader thread (hot reload while processing, so audio
     /// is never stalled by file IO).
+    /// The preset's embedded bytes for `slot`, when they match the ref's hash
+    /// and the referenced file is missing or has different content.
+    fn embedded_source(&self, slot: usize, r: &SlotRef) -> Option<loading::LoadSource> {
+        if r.content_hash == 0 {
+            return None;
+        }
+        let e = self.params.embedded.lock().ok()?[slot].clone()?;
+        if e.hash != r.content_hash {
+            return None;
+        }
+        let on_disk = mangle_loader::hash_file(std::path::Path::new(&r.path)).ok();
+        if on_disk == Some(r.content_hash) {
+            return None;
+        }
+        Some(loading::LoadSource::Embedded {
+            bytes: e.bytes,
+            ext: e.ext,
+            path: r.path.clone(),
+        })
+    }
+
     fn sync_slots_with_state(&mut self, cold: bool) {
         if let Ok(mut q) = self.params.pending_loads.lock() {
             q.retain(|p| !p.consumed);
@@ -907,10 +1028,16 @@ impl Mangle {
                 continue;
             }
             self.clear_slot(i);
-            let source = loading::LoadSource::File(std::path::PathBuf::from(&r.path));
+            let embedded = self.embedded_source(i, r);
+            let from_preset = embedded.is_some();
+            let source = embedded
+                .unwrap_or_else(|| loading::LoadSource::File(std::path::PathBuf::from(&r.path)));
             if !cold {
                 self.set_slot_status(i, loading::SlotStatus::Loading);
                 loading::spawn_load(self.params.clone(), i, source);
+                if from_preset {
+                    loading::note(&self.params, format!("slot {}: from preset", i + 1));
+                }
                 continue;
             }
             match loading::decode(&source, self.sample_rate) {
@@ -931,6 +1058,9 @@ impl Mangle {
                     }
                     self.loaded[i] = (d.path, d.content_hash);
                     self.set_slot_status(i, loading::SlotStatus::Loaded);
+                    if from_preset {
+                        loading::note(&self.params, format!("slot {}: from preset", i + 1));
+                    }
                 }
                 Err(status) => {
                     nih_log!(
@@ -2198,6 +2328,63 @@ mod tests {
         assert!(m.loaded[1].0.is_empty());
         assert_eq!(slot_status(&m, 1), loading::SlotStatus::Empty);
         assert_eq!(m.bank.slots[0].as_ref().unwrap().data[0].as_ptr(), ptr);
+    }
+
+    #[test]
+    fn embed_serializes_file_bytes_only_when_enabled() {
+        let dir = sync_dir("embed-ser");
+        let wav = dir.join("a.wav");
+        write_test_wav(&wav, 2400);
+        let bytes = std::fs::read(&wav).unwrap();
+        let m = test_plugin();
+        set_ref(&m, 0, &wav, mangle_loader::hash_bytes(&bytes));
+
+        assert!(!m.params.serialize_fields().contains_key("mangle_embed_0"));
+        m.params.extra.write().unwrap().embed_samples = true;
+        let fields = m.params.serialize_fields();
+        let v = fields.get("mangle_embed_0").expect("embed key");
+        let (ext, b64) = v.split_once(':').unwrap();
+        assert_eq!(ext, "wav");
+        assert_eq!(mangle_loader::b64_decode(b64).unwrap(), bytes);
+        assert!(!fields.contains_key("mangle_embed_1"));
+    }
+
+    #[test]
+    fn embedded_sample_round_trips_without_the_file() {
+        let dir = sync_dir("embed-rt");
+        let wav = dir.join("a.wav");
+        write_test_wav(&wav, 2400);
+        let hash = mangle_loader::hash_file(&wav).unwrap();
+        let m = test_plugin();
+        set_ref(&m, 0, &wav, hash);
+        m.params.extra.write().unwrap().embed_samples = true;
+        let fields = m.params.serialize_fields();
+        std::fs::remove_file(&wav).unwrap();
+
+        let mut fresh = Mangle::default();
+        fresh.prepare(48_000.0);
+        fresh.params.deserialize_fields(&fields);
+        fresh.sync_slots_with_state(true);
+        assert!(fresh.bank.slots[0].is_some());
+        assert_eq!(fresh.loaded[0].1, hash);
+        assert_eq!(slot_status(&fresh, 0), loading::SlotStatus::Loaded);
+    }
+
+    #[test]
+    fn corrupt_embedded_base64_is_ignored() {
+        let dir = sync_dir("embed-bad");
+        let wav = dir.join("gone.wav");
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert("mangle_embed_0".to_string(), "wav:@@@".to_string());
+        let mut m = test_plugin();
+        m.params.deserialize_fields(&fields);
+        set_ref(&m, 0, &wav, 7);
+        m.sync_slots_with_state(true);
+        assert!(m.bank.slots[0].is_none());
+        assert!(matches!(
+            slot_status(&m, 0),
+            loading::SlotStatus::Missing(_)
+        ));
     }
 
     #[test]

@@ -1481,6 +1481,17 @@ fn waveform_strip(
         ui.add_space(8.0);
         section_label(ui, "LOOP.POINTS");
         lock_btn(ui, &mut ex.locks.loop_points, ex_changed);
+        ui.add_space(8.0);
+        if tbtn(ui, "EMBED", ex.embed_samples, 56.0)
+            .on_hover_text(
+                "Pack the sample files into the preset so it is portable; \
+                 presets grow by the files' size",
+            )
+            .clicked()
+        {
+            ex.embed_samples = !ex.embed_samples;
+            *ex_changed = true;
+        }
         let line = if st.learn.is_some() {
             "touch a control\u{2026}".to_string()
         } else {
