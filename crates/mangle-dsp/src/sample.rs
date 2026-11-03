@@ -9,8 +9,8 @@
 //! * `Sinc`    — 8-tap Blackman-windowed sinc. Clean even at big pitch
 //!   shifts.
 //!
-//! The enum is stored in state as an integer step index, so spectral modes
-//! (Paulstretch-style smear etc.) can append in v2 without breaking saves.
+//! The enum is stored as an integer step index, so new algorithms can be
+//! appended without breaking saved patches.
 
 use std::sync::OnceLock;
 
@@ -90,8 +90,8 @@ impl SampleSlot {
     }
 
     /// Built-in fallback tone: 2 s additive saw at 110 Hz with slight
-    /// stereo detune. Loaded into slot 1 when the bank is empty so the
-    /// plugin makes sound before the sample loader lands (build step 4).
+    /// stereo detune. Loaded into slot 1 when no sample is available, so
+    /// the instrument always makes sound.
     pub fn test_tone(sample_rate: f32) -> Self {
         let n = (sample_rate * 2.0) as usize;
         let mut l = vec![0.0f32; n];

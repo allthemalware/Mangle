@@ -119,8 +119,8 @@ fn unpack_locks(bits: u32) -> RandomLocks {
     }
 }
 
-/// Placeholder content hash (FNV-1a 64) until BLAKE3 arrives with the
-/// loader.
+/// FNV-1a 64-bit hash, for tests and non-file data. Sample files are hashed
+/// with BLAKE3 by mangle-loader.
 pub fn content_hash(bytes: &[u8]) -> u64 {
     let mut h = 0xCBF2_9CE4_8422_2325u64;
     for b in bytes {
@@ -220,12 +220,27 @@ pub fn deserialize(data: &[u8]) -> Option<ExtraState> {
     let mut state = ExtraState::default();
     for c in state.curves.iter_mut() {
         for v in c.0.iter_mut() {
-            *v = r.f32()?.clamp(-1.0, 1.0);
+            let x = r.f32()?;
+            *v = if x.is_finite() {
+                x.clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
         }
     }
     state.locks = unpack_locks(r.u32()?);
-    state.random_amount = r.f32()?.clamp(0.0, 1.0);
-    state.random_complexity = r.f32()?.clamp(0.0, 1.0);
+    let amt = r.f32()?;
+    state.random_amount = if amt.is_finite() {
+        amt.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let cmplx = r.f32()?;
+    state.random_complexity = if cmplx.is_finite() {
+        cmplx.clamp(0.0, 1.0)
+    } else {
+        0.6
+    };
     state.last_seed = r.u64()?;
     for slot in state.slot_refs.iter_mut() {
         *slot = match r.u8()? {
@@ -386,5 +401,19 @@ mod tests {
         assert_eq!(a, content_hash(b"mangle"));
         assert_ne!(a, content_hash(b"mangle "));
         assert_ne!(content_hash(b""), 0);
+    }
+
+    #[test]
+    fn deserialize_sanitizes_non_finite_values() {
+        let mut bytes = serialize(&ExtraState::default());
+        // Byte 6 starts curve 0 sample 0; the amount f32 follows 9*256 curve
+        // samples and the u32 lock bits.
+        bytes[6..10].copy_from_slice(&f32::NAN.to_le_bytes());
+        let amount_at = 6 + 9 * 256 * 4 + 4;
+        bytes[amount_at..amount_at + 4].copy_from_slice(&f32::INFINITY.to_le_bytes());
+        let st = deserialize(&bytes).expect("blob still parses");
+        assert!(st.curves.iter().all(|c| c.0.iter().all(|v| v.is_finite())));
+        assert_eq!(st.curves[0].0[0], 0.0);
+        assert_eq!(st.random_amount, 1.0);
     }
 }

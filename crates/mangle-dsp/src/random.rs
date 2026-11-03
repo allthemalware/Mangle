@@ -13,15 +13,15 @@
 //! * **Amount** — how much of the displacement is applied. Continuous
 //!   params lerp toward their random target by `amount`; stepped params
 //!   switch with probability `amount`. Low amounts morph patches slowly.
-//! * Parameter pools mirror Torsion's defaults: grain Level and Pitch are
-//!   excluded out of the box, as are destructive destinations (Gate, Level,
-//!   Pitch) and the Noise source.
+//! * Parameter pools mirror Torsion's defaults: grain Level, Pitch,
+//!   Mode and Quant are excluded out of the box, as are destructive
+//!   destinations (Gate, Level, Pitch) and the Noise source.
 
 use crate::matrix::{self, ModDest, ModSource, Owner};
 use crate::params::{
-    pid, Module, ParamTable, Patch, GRAIN_LEVEL_IDX, GRAIN_PITCH_IDX, GRAIN_QUANT_IDX,
-    LFO_ONESHOT_IDX, LFO_TRIG_IDX, N_GRAIN_PARAMS, N_LFO_PARAMS, N_MATRIX_ROWS, SLOT_LOOP_END_IDX,
-    SLOT_LOOP_START_IDX,
+    pid, Module, ParamTable, Patch, GRAIN_LEVEL_IDX, GRAIN_MODE_IDX, GRAIN_PITCH_IDX,
+    GRAIN_QUANT_IDX, LFO_ONESHOT_IDX, LFO_TRIG_IDX, N_GRAIN_PARAMS, N_LFO_PARAMS, N_MATRIX_ROWS,
+    SLOT_LOOP_END_IDX, SLOT_LOOP_START_IDX,
 };
 use crate::rng::Rng;
 
@@ -64,6 +64,7 @@ impl Default for GrainParamPool {
         p[GRAIN_LEVEL_IDX as usize] = false; // Torsion default: Level unchecked
         p[GRAIN_PITCH_IDX as usize] = false; // Torsion default: Pitch unchecked
         p[GRAIN_QUANT_IDX as usize] = false; // scale lock is a deliberate tonal choice
+        p[GRAIN_MODE_IDX as usize] = false; // synthesis mode is a structural choice (Spectral is CPU-heavy)
         Self(p)
     }
 }
@@ -593,6 +594,30 @@ mod tests {
             for idx in [0u8, 3] {
                 let pos = t.pos(pid(Module::Slot, s, idx));
                 assert_eq!(p.values[pos], init.values[pos]);
+            }
+        }
+    }
+
+    #[test]
+    fn default_pool_never_changes_engine_mode() {
+        let t = ParamTable::new();
+        assert!(!GrainParamPool::default().0[GRAIN_MODE_IDX as usize]);
+        let opts = RandomOptions {
+            amount: 1.0,
+            complexity: 1.0,
+            ..Default::default()
+        };
+        for seed in 0..32u64 {
+            let mut p = Patch::init(&t);
+            randomize(&mut p, &t, &opts, seed);
+            for g in 0..3u8 {
+                let pos = t.pos(pid(Module::Grain, g, GRAIN_MODE_IDX));
+                assert_eq!(
+                    p.values[pos],
+                    0.0,
+                    "seed {seed} changed Grain {} Mode",
+                    g + 1
+                );
             }
         }
     }

@@ -33,15 +33,26 @@ pub struct Svf {
     ic2: f32,
     g: f32,
     k: f32,
+    a1: f32,
+    a2: f32,
+    a3: f32,
 }
 
 impl Default for Svf {
     fn default() -> Self {
+        let g = 0.1;
+        let k = 1.0;
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
+        let a3 = g * a2;
         Self {
             ic1: 0.0,
             ic2: 0.0,
-            g: 0.1,
-            k: 1.0,
+            g,
+            k,
+            a1,
+            a2,
+            a3,
         }
     }
 }
@@ -54,17 +65,17 @@ impl Svf {
         let c = cutoff_hz.clamp(20.0, sample_rate * 0.47);
         self.g = (core::f32::consts::PI * c / sample_rate).tan();
         self.k = 2.0 - 1.96 * reso.clamp(0.0, 1.0);
+        self.a1 = 1.0 / (1.0 + self.g * (self.g + self.k));
+        self.a2 = self.g * self.a1;
+        self.a3 = self.g * self.a2;
     }
 
     /// Process one sample through the selected response.
     #[inline]
     pub fn process(&mut self, v0: f32, ftype: FilterType) -> f32 {
-        let a1 = 1.0 / (1.0 + self.g * (self.g + self.k));
-        let a2 = self.g * a1;
-        let a3 = self.g * a2;
         let v3 = v0 - self.ic2;
-        let v1 = a1 * self.ic1 + a2 * v3;
-        let v2 = self.ic2 + a2 * self.ic1 + a3 * v3;
+        let v1 = self.a1 * self.ic1 + self.a2 * v3;
+        let v2 = self.ic2 + self.a2 * self.ic1 + self.a3 * v3;
         self.ic1 = 2.0 * v1 - self.ic1;
         self.ic2 = 2.0 * v2 - self.ic2;
         // Denormal flush on the integrator states (Skrongle's original lacks
