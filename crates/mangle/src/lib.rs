@@ -646,17 +646,7 @@ impl Plugin for Mangle {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        self.sample_rate = buffer_config.sample_rate;
-        self.params
-            .sr_bits
-            .store(self.sample_rate.to_bits(), Ordering::Release);
-        self.squeeze = Squeeze::new(self.sample_rate);
-        for f in self.filter.iter_mut() {
-            f.clear();
-        }
-        self.smooth_coef = 1.0 - (-1.0f32 / (0.005 * self.sample_rate)).exp();
-        mangle_dsp::sample::warm_tables(); // no lazy alloc on the audio thread
-        mangle_dsp::spectral::warm(); // pre-build the spectral FFT plan + window
+        self.prepare(buffer_config.sample_rate);
 
         // Load referenced samples from state. `initialize` runs with the
         // plugin deactivated, so blocking file IO + resampling is fine
@@ -746,11 +736,80 @@ impl Plugin for Mangle {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        let block = buffer.samples();
-        let bpm = context.transport().tempo.unwrap_or(120.0) as f32;
-        let playing = context.transport().playing;
-        let pos_sec0 = context.transport().pos_seconds();
+        let transport = {
+            let t = context.transport();
+            BlockTransport {
+                tempo: t.tempo,
+                playing: t.playing,
+                pos_seconds: t.pos_seconds(),
+            }
+        };
+        self.sync_gui_state();
 
+        // 1. Host params → base patch (+ mono-modulation overrides).
+        self.params.read_into(&mut self.base);
+        for (id, v) in self.mono_overrides.iter() {
+            if let Some(pos) = self.params.table.try_pos(*id) {
+                self.base.values[pos] = *v;
+            }
+        }
+
+        let output = buffer.as_slice();
+        let (first, second) = output.split_at_mut(1);
+        self.render_block(first[0], second[0], transport, &mut ContextEvents(context));
+        ProcessStatus::Normal
+    }
+}
+
+/// Adapts nih-plug's `ProcessContext` to `BlockEvents`.
+struct ContextEvents<'a, C: ProcessContext<Mangle>>(&'a mut C);
+
+impl<C: ProcessContext<Mangle>> BlockEvents for ContextEvents<'_, C> {
+    fn next_event(&mut self) -> Option<NoteEvent<()>> {
+        self.0.next_event()
+    }
+
+    fn send_event(&mut self, event: NoteEvent<()>) {
+        self.0.send_event(event);
+    }
+}
+
+/// Transport snapshot for one block, independent of the host API.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct BlockTransport {
+    pub tempo: Option<f64>,
+    pub playing: bool,
+    pub pos_seconds: Option<f64>,
+}
+
+/// Note-event I/O for one block. `process` adapts nih-plug's ProcessContext;
+/// tests use a scripted queue.
+pub(crate) trait BlockEvents {
+    fn next_event(&mut self) -> Option<NoteEvent<()>>;
+    fn send_event(&mut self, event: NoteEvent<()>);
+}
+
+impl Mangle {
+    /// Sample-rate dependent, IO-free setup (everything `initialize` does except
+    /// loading samples): sample_rate, sr_bits, Squeeze, filter clear, smoothing
+    /// coefficient, table warm-up.
+    pub(crate) fn prepare(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate;
+        self.params
+            .sr_bits
+            .store(self.sample_rate.to_bits(), Ordering::Release);
+        self.squeeze = Squeeze::new(self.sample_rate);
+        for f in self.filter.iter_mut() {
+            f.clear();
+        }
+        self.smooth_coef = 1.0 - (-1.0f32 / (0.005 * self.sample_rate)).exp();
+        mangle_dsp::sample::warm_tables(); // no lazy alloc on the audio thread
+        mangle_dsp::spectral::warm(); // pre-build the spectral FFT plan + window
+    }
+
+    /// GUI → audio hand-offs done at the top of each block: curve sync and the
+    /// pending-load swap.
+    fn sync_gui_state(&mut self) {
         // 0. Sync curve copies when the main thread edited state
         //    (non-blocking; skip this block on contention).
         let gen = self.params.extra_gen.load(Ordering::Acquire);
@@ -786,6 +845,22 @@ impl Plugin for Mangle {
                 p.consumed = true;
             }
         }
+    }
+
+    /// Render one block into `out_l`/`out_r` (overwritten) from `self.base`,
+    /// which the caller has already filled. Starts with the GUI panic check and
+    /// contains everything `process` did after filling `self.base`.
+    pub(crate) fn render_block<E: BlockEvents>(
+        &mut self,
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        transport: BlockTransport,
+        io: &mut E,
+    ) {
+        let block = out_l.len();
+        let bpm = transport.tempo.unwrap_or(120.0) as f32;
+        let playing = transport.playing;
+        let pos_sec0 = transport.pos_seconds;
 
         // Panic request from the GUI (RND etc.): hard-stop every voice so
         // nothing hangs over the parameter change.
@@ -796,14 +871,6 @@ impl Plugin for Mangle {
                 for lane in v.lanes.iter_mut() {
                     lane.reset();
                 }
-            }
-        }
-
-        // 1. Host params → base patch (+ mono-modulation overrides).
-        self.params.read_into(&mut self.base);
-        for (id, v) in self.mono_overrides.iter() {
-            if let Some(pos) = self.params.table.try_pos(*id) {
-                self.base.values[pos] = *v;
             }
         }
 
@@ -848,10 +915,6 @@ impl Plugin for Mangle {
         }
 
         // 6. Output slices.
-        let output = buffer.as_slice();
-        let (first, second) = output.split_at_mut(1);
-        let out_l: &mut [f32] = first[0];
-        let out_r: &mut [f32] = second[0];
         out_l.fill(0.0);
         out_r.fill(0.0);
 
@@ -876,7 +939,7 @@ impl Plugin for Mangle {
         let rows_buf = self.rows;
         let rows = &rows_buf[..self.n_rows];
         let mut off = 0usize;
-        let mut next_event = context.next_event();
+        let mut next_event = io.next_event();
         while off < block {
             // Apply every event due at or before this sample, then bound the
             // segment by the next event so its onset lands on the exact sample.
@@ -885,7 +948,7 @@ impl Plugin for Mangle {
                     break;
                 }
                 self.apply_event(ev, &gate_sync);
-                next_event = context.next_event();
+                next_event = io.next_event();
             }
             let seg_end = segment_end(
                 off,
@@ -1067,7 +1130,7 @@ impl Plugin for Mangle {
         // state carries into the next block).
         while let Some(ev) = next_event {
             self.apply_event(ev, &gate_sync);
-            next_event = context.next_event();
+            next_event = io.next_event();
         }
 
         // 8. Voice termination (lets the host recycle CLAP note ids).
@@ -1075,7 +1138,7 @@ impl Plugin for Mangle {
             if voice.was_sounding && !voice.sounding() {
                 voice.was_sounding = false;
                 if voice.note_id >= 0 {
-                    context.send_event(NoteEvent::VoiceTerminated {
+                    io.send_event(NoteEvent::VoiceTerminated {
                         timing: block.saturating_sub(1) as u32,
                         voice_id: Some(voice.note_id),
                         channel: voice.channel,
@@ -1179,8 +1242,6 @@ impl Plugin for Mangle {
                 *f = ff;
             }
         }
-
-        ProcessStatus::Normal
     }
 }
 
@@ -1206,7 +1267,114 @@ nih_export_clap!(Mangle);
 
 #[cfg(test)]
 mod tests {
-    use super::segment_end;
+    use super::*;
+    use std::collections::VecDeque;
+
+    #[derive(Default)]
+    struct Scripted {
+        input: VecDeque<NoteEvent<()>>,
+        sent: Vec<NoteEvent<()>>,
+    }
+
+    impl BlockEvents for Scripted {
+        fn next_event(&mut self) -> Option<NoteEvent<()>> {
+            self.input.pop_front()
+        }
+        fn send_event(&mut self, event: NoteEvent<()>) {
+            self.sent.push(event);
+        }
+    }
+
+    fn test_plugin() -> Mangle {
+        let mut m = Mangle::default();
+        m.prepare(48_000.0);
+        m.bank.slots[0] = Some(SampleSlot::test_tone(48_000.0));
+        m
+    }
+
+    fn note_on() -> NoteEvent<()> {
+        NoteEvent::NoteOn {
+            timing: 0,
+            voice_id: Some(5),
+            channel: 0,
+            note: 45,
+            velocity: 0.8,
+        }
+    }
+
+    fn render(m: &mut Mangle, io: &mut Scripted, out: &mut Vec<f32>, samples: usize, bs: usize) {
+        let mut l = vec![0.0f32; bs];
+        let mut r = vec![0.0f32; bs];
+        for _ in 0..samples / bs {
+            m.params.read_into(&mut m.base);
+            m.render_block(&mut l, &mut r, BlockTransport::default(), io);
+            out.extend_from_slice(&l);
+            out.extend_from_slice(&r);
+        }
+    }
+
+    #[test]
+    fn note_renders_audio_and_reports_note_end() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        io.input.push_back(note_on());
+        let mut out = Vec::new();
+        render(&mut m, &mut io, &mut out, 24_000 / 512 * 512, 512);
+        assert!(out.iter().all(|s| s.is_finite()));
+        let rms = (out.iter().map(|s| s * s).sum::<f32>() / out.len() as f32).sqrt();
+        assert!(rms > 0.01, "rms {rms}");
+
+        io.input.push_back(NoteEvent::NoteOff {
+            timing: 0,
+            voice_id: Some(5),
+            channel: 0,
+            note: 45,
+            velocity: 0.0,
+        });
+        let mut tail = Vec::new();
+        render(&mut m, &mut io, &mut tail, 144_000 / 512 * 512, 512);
+        assert!(tail.iter().all(|s| s.is_finite()));
+        let ended: Vec<_> = io
+            .sent
+            .iter()
+            .filter(|e| matches!(e, NoteEvent::VoiceTerminated { .. }))
+            .collect();
+        assert_eq!(ended.len(), 1);
+        assert!(matches!(
+            ended[0],
+            NoteEvent::VoiceTerminated {
+                voice_id: Some(5),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn block_size_does_not_change_output() {
+        let run = |bs: usize| {
+            let mut m = test_plugin();
+            let mut io = Scripted::default();
+            io.input.push_back(note_on());
+            let mut l = vec![0.0f32; bs];
+            let mut r = vec![0.0f32; bs];
+            let mut out = Vec::new();
+            for _ in 0..8192 / bs {
+                m.params.read_into(&mut m.base);
+                m.render_block(&mut l, &mut r, BlockTransport::default(), &mut io);
+                out.extend_from_slice(&l);
+                out.extend_from_slice(&r);
+            }
+            // Interleave-free comparison: split per channel.
+            let mut lo = Vec::new();
+            let mut ro = Vec::new();
+            for c in out.chunks(bs * 2) {
+                lo.extend_from_slice(&c[..bs]);
+                ro.extend_from_slice(&c[bs..]);
+            }
+            (lo, ro)
+        };
+        assert_eq!(run(512), run(64));
+    }
 
     #[test]
     fn segment_end_caps_and_breaks() {
