@@ -6,8 +6,8 @@
 //! here too, so the nih-plug shell stays thin and everything is testable
 //! without a host.
 //!
-//! Mod-matrix application slots in between `compose_voice_patch` and the
-//! `lane_params`/`lfo` resolvers in build step 5.
+//! The shell composes the voice patch, applies the mod-matrix passes to it,
+//! then calls these resolvers on the result.
 
 use crate::curve::LfoParams;
 use crate::engine::{GrainMode, LaneParams, PitchQuant};
@@ -18,6 +18,32 @@ use crate::sample::Algo;
 fn disp(patch: &Patch, table: &ParamTable, m: Module, inst: u8, idx: u8) -> f32 {
     let pos = table.pos(pid(m, inst, idx));
     table.infos[pos].map.to_display(patch.values[pos])
+}
+
+/// Display values of one module instance, whose params sit contiguously in
+/// the table in index order; the id is decoded once per instance.
+struct Inst<'a> {
+    patch: &'a Patch,
+    table: &'a ParamTable,
+    base: usize,
+}
+
+impl<'a> Inst<'a> {
+    #[inline]
+    fn new(patch: &'a Patch, table: &'a ParamTable, m: Module, inst: u8) -> Self {
+        Self {
+            patch,
+            table,
+            base: table.pos(pid(m, inst, 0)),
+        }
+    }
+
+    #[inline]
+    fn d(&self, idx: u8) -> f32 {
+        let pos = self.base + idx as usize;
+        debug_assert_eq!(self.table.infos[pos].index, idx);
+        self.table.infos[pos].map.to_display(self.patch.values[pos])
+    }
 }
 
 /// Frequency of one cycle of tempo division `idx` at `bpm`.
@@ -37,7 +63,8 @@ pub fn lane_params(
     voice_gate: bool,
     global_on: bool,
 ) -> (LaneParams, bool) {
-    let d = |idx: u8| disp(patch, table, Module::Grain, engine, idx);
+    let inst = Inst::new(patch, table, Module::Grain, engine);
+    let d = |idx: u8| inst.d(idx);
     let rate_hz = if d(2) >= 0.5 {
         div_to_hz(d(3) as usize, bpm)
     } else {
@@ -80,7 +107,8 @@ pub fn lfo_params(
     inst: u8,
     bpm: f32,
 ) -> (LfoParams, bool) {
-    let d = |idx: u8| disp(patch, table, module, inst, idx);
+    let unit = Inst::new(patch, table, module, inst);
+    let d = |idx: u8| unit.d(idx);
     let rate_hz = if d(3) >= 0.5 {
         div_to_hz(d(4) as usize, bpm)
     } else {

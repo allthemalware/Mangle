@@ -4,8 +4,6 @@
 //! or renumbered. The table is the single source of truth the plugin shell,
 //! GUI, state, and randomizer all read from.
 
-use std::collections::HashMap;
-
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Module {
     Global = 0x00,
@@ -732,7 +730,7 @@ pub fn build_param_table() -> Vec<ParamInfo> {
             &mut t,
             Module::Matrix,
             r,
-            &format!("Mod {:02}", r),
+            &format!("Mod {:02}", r + 1),
             matrix_specs(),
         );
     }
@@ -740,16 +738,35 @@ pub fn build_param_table() -> Vec<ParamInfo> {
     t
 }
 
-/// Built table plus an id → position index.
+/// Built table plus a dense id → position index.
 pub struct ParamTable {
     pub infos: Vec<ParamInfo>,
-    index: HashMap<u32, usize>,
+    index: Box<[u16]>,
+}
+
+const IDX_MODULES: usize = 10;
+const IDX_DIM: usize = 32;
+const IDX_ABSENT: u16 = u16::MAX;
+
+/// Dense slot for an id, or `None` when any field is out of range.
+#[inline]
+fn slot(id: u32) -> Option<usize> {
+    let m = (id >> 16) as usize;
+    let i = ((id >> 8) & 0xFF) as usize;
+    let x = (id & 0xFF) as usize;
+    if m >= IDX_MODULES || i >= IDX_DIM || x >= IDX_DIM {
+        return None;
+    }
+    Some((m * IDX_DIM + i) * IDX_DIM + x)
 }
 
 impl ParamTable {
     pub fn new() -> Self {
         let infos = build_param_table();
-        let index = infos.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
+        let mut index = vec![IDX_ABSENT; IDX_MODULES * IDX_DIM * IDX_DIM].into_boxed_slice();
+        for (i, p) in infos.iter().enumerate() {
+            index[slot(p.id).expect("param id out of index range")] = i as u16;
+        }
         Self { infos, index }
     }
 
@@ -762,11 +779,12 @@ impl ParamTable {
     }
 
     pub fn pos(&self, id: u32) -> usize {
-        self.index[&id]
+        self.try_pos(id).expect("unknown param id")
     }
 
     pub fn try_pos(&self, id: u32) -> Option<usize> {
-        self.index.get(&id).copied()
+        let v = self.index[slot(id)?];
+        (v != IDX_ABSENT).then_some(v as usize)
     }
 
     pub fn get(&self, id: u32) -> &ParamInfo {
@@ -823,7 +841,7 @@ mod tests {
         // Spot checks against the documented scheme.
         assert_eq!(pid(Module::Global, 0, 4), 0x0000_0004); // Level
         assert_eq!(pid(Module::Grain, 1, 4), 0x0002_0104); // Grain 2 Jitter
-        assert_eq!(pid(Module::Matrix, 31, 5), 0x0008_1F05); // Mod 31 Scale
+        assert_eq!(pid(Module::Matrix, 31, 5), 0x0008_1F05); // Mod 32 Scale
         assert_eq!(t.get(0x0002_0104).name, "Grain 2 Jitter");
     }
 
