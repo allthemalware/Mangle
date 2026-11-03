@@ -306,6 +306,8 @@ pub struct Lane {
     fading: Vec<ActiveGrain>,
     /// Output samples elapsed in the current steal fade.
     fade_age: u32,
+    /// Emission offsets for the current block. Capacity is fixed (128) and
+    /// never grown on the audio thread: emissions beyond it are dropped.
     scratch: Vec<(u8, usize)>,
     rng: Rng,
     /// Stretch-mode read playhead per channel, as normalized loop-window
@@ -330,7 +332,7 @@ impl Lane {
             grains: Vec::with_capacity(MAX_GRAINS),
             fading: Vec::with_capacity(MAX_GRAINS),
             fade_age: 0,
-            scratch: Vec::with_capacity(64),
+            scratch: Vec::with_capacity(128),
             rng: Rng::new(seed),
             playheads: [0.0; 2],
             pos_phase: [f64::NAN; 2],
@@ -357,8 +359,10 @@ impl Lane {
                 Some(s) if !s.is_empty() => s.len(),
                 _ => continue, // slot vanished/swapped: grain dies next block
             };
+            let wlen = g.snap.wlen.max(1) as f64;
+            let rel = (g.pos - g.snap.wstart as f64).rem_euclid(wlen);
             out[n] = GrainView {
-                pos: (g.pos / len as f64).clamp(0.0, 1.0) as f32,
+                pos: ((g.snap.wstart as f64 + rel) / len as f64).clamp(0.0, 1.0) as f32,
                 age: (g.age as f32 / g.snap.length.max(1) as f32).clamp(0.0, 1.0),
                 level: g.snap.level,
                 slot: g.snap.slot as u8,
@@ -537,13 +541,18 @@ impl Lane {
     ) {
         // Ring out any stolen-voice fade tail first, so it declicks the steal
         // regardless of the new note's mode, mixing additively under the note.
+        // Switching into Spectral hands the live grains to that fade first.
+        if p[0].mode == GrainMode::Spectral && !self.grains.is_empty() {
+            core::mem::swap(&mut self.grains, &mut self.fading);
+            self.grains.clear();
+            self.fade_age = 0;
+        }
         self.render_fading(bank, out_l, out_r, block);
 
         // Spectral mode bypasses the grain pool entirely (Mode is not matrix-
-        // modulated, so both channels agree). Drop any grains left over from a
-        // previous mode, then run the phase vocoder.
+        // modulated, so both channels agree). Grains left over from a previous
+        // mode ring out under the steal fade, then the phase vocoder runs.
         if p[0].mode == GrainMode::Spectral {
-            self.grains.clear();
             self.spectral
                 .process(p, bank, sample_rate, out_l, out_r, block);
             return;
@@ -559,7 +568,18 @@ impl Lane {
                     let vel = if self.pos_phase[ch].is_nan() {
                         0.0 // first chunk after reset: no previous phase
                     } else {
-                        (cur - self.pos_phase[ch]) * wlen as f64 / block.max(1) as f64
+                        // The scan phase wraps 0..1; unwrap the jump so it isn't a chirp.
+                        let mut d = cur - self.pos_phase[ch];
+                        d -= d.round();
+                        // The curve's closing segment sweeps back to its start
+                        // over several blocks, too fast to be a real scrub:
+                        // treat motion beyond the clamp as a jump, not a drag.
+                        let v = d * wlen as f64 / block.max(1) as f64;
+                        if v.abs() > 32.0 {
+                            0.0
+                        } else {
+                            v
+                        }
                     };
                     self.pos_phase[ch] = cur;
                     vel.clamp(-32.0, 32.0)
@@ -589,7 +609,9 @@ impl Lane {
                         pc.jitter
                     };
                     emitter.advance(block, pc.rate_hz, timing_jitter, sample_rate, rng, |off| {
-                        scratch.push((ch as u8, off));
+                        if scratch.len() < scratch.capacity() {
+                            scratch.push((ch as u8, off));
+                        }
                     });
                 }
             }
