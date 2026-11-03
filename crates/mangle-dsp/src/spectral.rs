@@ -13,7 +13,11 @@
 //!   the inter-frame phase delta) keeps partials coherent across frames.
 //! * Pitch shift by ratio `r = 2^(semitones/12)` remaps analysis bin `k` to
 //!   synthesis bin `round(k·r)` and scales its frequency by `r` (formant-
-//!   shifting, like Clouds' default — formant preservation is a v2 refinement).
+//!   shifting, like Clouds' default). Shape engages cepstral formant
+//!   preservation, which holds the spectral envelope while harmonics move.
+//! * A frozen spectrum (Direction 0) analyses a second frame one `HOP` later
+//!   and derives each bin's true frequency from the phase advance between the
+//!   two, so partials sustain at their real pitch rather than the bin centre.
 //!
 //! Dependency-free: the FFT lives in `crate::fft`. All per-frame buffers are
 //! pre-allocated (`SpectralState::new`, off the audio thread), so synthesis
@@ -269,6 +273,9 @@ impl<'a> ChanCtx<'a> {
 struct Scratch {
     re: Vec<f32>,
     im: Vec<f32>,
+    /// Second analysis frame (one `HOP` later), used only while frozen.
+    re2: Vec<f32>,
+    im2: Vec<f32>,
     mag: Vec<f32>,
     freq: Vec<f32>,
     /// Current analysis phase per bin (for identity phase locking).
@@ -289,6 +296,8 @@ impl Scratch {
         Self {
             re: vec![0.0; FRAME],
             im: vec![0.0; FRAME],
+            re2: vec![0.0; FRAME],
+            im2: vec![0.0; FRAME],
             mag: vec![0.0; NBINS],
             freq: vec![0.0; NBINS],
             cur_phase: vec![0.0; NBINS],
@@ -307,6 +316,8 @@ pub struct SpectralState {
     scratch: Scratch,
     /// Σ w² at stride HOP — the Hann overlap-add gain to divide back out.
     norm: f32,
+    /// Whether the previous `process` call used the shared mono fast path.
+    prev_shared: bool,
 }
 
 impl SpectralState {
@@ -322,12 +333,14 @@ impl SpectralState {
             ch: [Channel::new(0x5EED_0001), Channel::new(0x5EED_0002)],
             scratch: Scratch::new(),
             norm: norm.max(1e-9),
+            prev_shared: false,
         }
     }
 
     pub fn reset(&mut self) {
         self.ch[0].reset();
         self.ch[1].reset();
+        self.prev_shared = false;
     }
 
     /// True while either channel still has output to emit (a release tail).
@@ -355,7 +368,12 @@ impl SpectralState {
         out_r: &mut [f32],
         block: usize,
     ) {
-        let SpectralState { ch, scratch, norm } = self;
+        let SpectralState {
+            ch,
+            scratch,
+            norm,
+            prev_shared,
+        } = self;
         let cx = [
             ChanCtx::resolve(&p[0], bank, 0),
             ChanCtx::resolve(&p[1], bank, 1),
@@ -374,6 +392,9 @@ impl SpectralState {
             && cx[1].blur == 0.0
             && cx[0].shareable(&cx[1]);
 
+        let was_shared = *prev_shared;
+        *prev_shared = share;
+
         if share {
             if cx[0].silent(&ch[0]) {
                 return;
@@ -387,6 +408,19 @@ impl SpectralState {
                 out_r[i] += s * cx[0].gswap + s * cx[1].gl; // ch0 swap→R + ch1 keep→R
             }
         } else {
+            if was_shared {
+                // Continue the right channel from the shared vocoder's state.
+                let (a, b) = ch.split_at_mut(1);
+                let (a, b) = (&a[0], &mut b[0]);
+                b.pos = a.pos;
+                b.last_phase.copy_from_slice(&a.last_phase);
+                b.sum_phase.copy_from_slice(&a.sum_phase);
+                b.acc.copy_from_slice(&a.acc);
+                b.pending.copy_from_slice(&a.pending);
+                b.pending_head = a.pending_head;
+                b.draining_frames = a.draining_frames;
+                b.primed = a.primed;
+            }
             for (c, chan) in ch.iter_mut().enumerate() {
                 let cc = &cx[c];
                 if cc.silent(chan) {
@@ -449,13 +483,24 @@ fn generate(
 
     // 2. Magnitude + instantaneous (true) per-sample frequency per bin.
     let frozen = ha.abs() < 1e-6;
+    if frozen {
+        // Second frame one HOP later: its phase advance gives the true frequency.
+        for i in 0..FRAME {
+            st.re2[i] =
+                read(data, read_start + (HOP + i) as f64, wstart, wlen, p.algo) * w[i] * gain;
+            st.im2[i] = 0.0;
+        }
+        fft.transform(&mut st.re2, &mut st.im2, false);
+    }
     for k in 0..NBINS {
         let (re, im) = (st.re[k], st.im[k]);
         st.mag[k] = (re * re + im * im).sqrt();
         let phase = im.atan2(re);
         let nominal = bin_w * k as f32;
         st.freq[k] = if frozen {
-            nominal // freeze: sustain each bin at its centre frequency
+            let phase2 = st.im2[k].atan2(st.re2[k]);
+            let dev = princarg(phase2 - phase - nominal * HOP as f32);
+            nominal + dev / HOP as f32
         } else {
             let expected = nominal * ha as f32;
             let dev = princarg(phase - chan.last_phase[k] - expected);
@@ -691,5 +736,45 @@ mod tests {
                 "bin {j} not locked to {peak}"
             );
         }
+    }
+
+    #[test]
+    fn share_to_independent_switch_continues_right_channel() {
+        use crate::sample::SampleSlot;
+        const SR: f32 = 48_000.0;
+        let n = SR as usize * 2;
+        let d: Vec<f32> = (0..n)
+            .map(|i| 0.5 * (core::f32::consts::TAU * 220.0 * i as f32 / SR).sin())
+            .collect();
+        let mut bank = SampleBank::new();
+        bank.slots[0] = Some(SampleSlot {
+            data: [d.clone(), d],
+            sample_rate: SR,
+            root_note: 60,
+            loop_start: 0,
+            loop_end: n,
+            gain: 1.0,
+            mono: true,
+        });
+        let mut p = LaneParams {
+            direction: 1.0,
+            ..LaneParams::default()
+        };
+        let mut st = SpectralState::new();
+        let rms = |x: &[f32]| (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();
+        let (mut l, mut r) = (vec![0.0f32; 24_000], vec![0.0f32; 24_000]);
+        st.process(&[p, p], &bank, SR, &mut l, &mut r, 24_000);
+        let before = rms(&r[24_000 - 1024..]);
+
+        let shared = p;
+        p.pitch_st = 0.05;
+        let (mut l2, mut r2) = (vec![0.0f32; 1024], vec![0.0f32; 1024]);
+        st.process(&[shared, p], &bank, SR, &mut l2, &mut r2, 1024);
+        let after = rms(&r2);
+        assert!(before > 0.01, "shared render silent: {before}");
+        assert!(
+            after >= 0.5 * before,
+            "right channel dropped after switch: {after} vs {before}"
+        );
     }
 }
