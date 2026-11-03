@@ -109,6 +109,8 @@ pub struct LfoParams {
     pub gate: bool,
     /// One-shot: run once to the end of the curve and hold the final value
     /// instead of looping, turning the drawable curve into an MSEG envelope.
+    /// Phase is the start point: the read position is `cycle + phase`, held
+    /// at the end of the curve (free-running, or per transport cycle).
     /// Retrigger (Trig / Gate-Sync) re-fires it.
     pub one_shot: bool,
 }
@@ -149,17 +151,20 @@ impl LfoState {
         dt: f32,
     ) -> (f32, f32) {
         let ph = phase.rem_euclid(1.0);
-        self.running_phase = if p.one_shot {
-            ph.min(ONE_SHOT_HOLD)
-        } else {
-            ph
-        };
+        self.running_phase = ph;
         self.emit(curve, p, dt)
     }
 
     fn emit(&mut self, curve: &Curve, p: &LfoParams, dt: f32) -> (f32, f32) {
-        let l_raw = curve.sample(self.running_phase + p.phase);
-        let r_raw = curve.sample(self.running_phase + p.phase + p.st_phase * 0.5);
+        let l_pos = self.running_phase + p.phase;
+        let r_pos = l_pos + p.st_phase * 0.5;
+        let (l_pos, r_pos) = if p.one_shot {
+            (l_pos.min(ONE_SHOT_HOLD), r_pos.min(ONE_SHOT_HOLD))
+        } else {
+            (l_pos, r_pos)
+        };
+        let l_raw = curve.sample(l_pos);
+        let r_raw = curve.sample(r_pos);
         let a = lag_coeff(p.lag, dt);
         self.lag_l += (l_raw - self.lag_l) * a;
         self.lag_r += (r_raw - self.lag_r) * a;
@@ -222,8 +227,8 @@ impl DriftPair {
     }
 }
 
-/// One Noise unit: uniform random per *grain* (no smoothing). The engine
-/// calls `roll` once per grain snapshot per channel pair.
+/// One Noise unit: uniform random −1..1, sample-and-hold (no smoothing),
+/// re-rolled by `GlobalMod` at a fixed 750 Hz.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoisePair;
 

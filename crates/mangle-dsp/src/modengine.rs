@@ -14,8 +14,8 @@
 //! Feedback (an LFO modulating an LFO, a Loop LFO as a source for its own
 //! rate) uses last-block values — a one-block delay, standard practice.
 //!
-//! Current control rate = one tick per host block. Sub-block ticking is a
-//! later refinement; grain snapshots already read instantaneous values.
+//! The shell ticks modulation once per ~64-sample control chunk (chunks also
+//! split at note events); grain snapshots read the current tick's values.
 
 use crate::curve::{Curve, DriftPair, LfoState, NoisePair};
 use crate::matrix::{self, dest_from_index, FxDest, GrainDest, LfoDest, ModDest, ModSource};
@@ -298,6 +298,9 @@ impl EnvFollower {
     }
 }
 
+/// Control-rate Noise re-roll frequency (sample-and-hold clock).
+const NOISE_RATE_HZ: f64 = 750.0;
+
 /// Global modulation sources: six LFOs, three Drifts, three Noises, the
 /// env follower and the constants. Owns its state; curves are passed in
 /// (they live in plugin state).
@@ -309,6 +312,8 @@ pub struct GlobalMod {
     pub last_noise: [(f32, f32); 3],
     pub env: EnvFollower,
     rng: Rng,
+    noise_rng: Rng,
+    noise_phase: f64,
 }
 
 impl GlobalMod {
@@ -321,6 +326,15 @@ impl GlobalMod {
             last_noise: [(0.0, 0.0); 3],
             env: EnvFollower::default(),
             rng: Rng::new(seed),
+            noise_rng: Rng::new(seed ^ 0x4E4F_4953_4500_0000),
+            noise_phase: 0.0,
+        }
+    }
+
+    /// Restart global LFO `i` (one-shots re-fire from Phase); out-of-range is ignored.
+    pub fn trig_lfo(&mut self, i: usize) {
+        if let Some(l) = self.lfos.get_mut(i) {
+            l.trig();
         }
     }
 
@@ -350,9 +364,16 @@ impl GlobalMod {
         for d in 0..3 {
             let st = resolve::st_phase(patch, table, Module::Drift, d as u8);
             self.last_drift[d] = self.drifts[d].tick(dt, st, &mut self.rng);
-            let stn = resolve::st_phase(patch, table, Module::Noise, d as u8);
-            self.last_noise[d] = NoisePair.roll(stn, &mut self.rng);
         }
+        self.noise_phase += dt as f64 * NOISE_RATE_HZ;
+        while self.noise_phase >= 1.0 - 1e-6 {
+            for d in 0..3 {
+                let stn = resolve::st_phase(patch, table, Module::Noise, d as u8);
+                self.last_noise[d] = NoisePair.roll(stn, &mut self.noise_rng);
+            }
+            self.noise_phase -= 1.0;
+        }
+        self.noise_phase = self.noise_phase.max(0.0);
     }
 
     /// Write the global source slots (LFOs, Drift, Noise, constants, Env)
@@ -763,5 +784,31 @@ mod tests {
         assert_eq!(sv.v[0][idx(ModSource::VoiceRandom)], -0.6);
         // Macros default to 0 % → bipolar 0.
         assert!(sv.v[0][idx(ModSource::Macro(3))].abs() < 1e-6);
+    }
+
+    #[test]
+    fn trig_lfo_restarts_a_global_one_shot() {
+        let (t, mut p) = setup();
+        p.values[t.pos(pid(Module::Lfo, 0, crate::params::LFO_ONESHOT_IDX))] = 1.0;
+        let curves = [
+            Curve::ramp(),
+            Curve::sine(),
+            Curve::sine(),
+            Curve::sine(),
+            Curve::sine(),
+            Curve::sine(),
+        ];
+        let mut g = GlobalMod::new(1);
+        for _ in 0..3000 {
+            g.tick(&p, &t, &curves, 120.0, 0.001, None);
+        }
+        assert!(g.last_lfo[0].0 > 0.95, "one-shot should hold its end");
+        g.trig_lfo(0);
+        g.tick(&p, &t, &curves, 120.0, 0.001, None);
+        assert!(
+            g.last_lfo[0].0 < -0.9,
+            "trig_lfo should restart the one-shot"
+        );
+        g.trig_lfo(99); // out of range: ignored
     }
 }
