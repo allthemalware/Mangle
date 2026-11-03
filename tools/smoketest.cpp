@@ -155,9 +155,9 @@ int main(int argc, char **argv) {
         if (!strcmp(info.name, "Filter Cutoff")) {
             fCutId = info.id; fCutMin = info.min_value; fCutMax = info.max_value;
         }
-        if (!strcmp(info.name, "Mod 00 Source")) { mSrcId = info.id; mSrcMax = info.max_value; }
-        if (!strcmp(info.name, "Mod 00 Dest 1")) { mDstId = info.id; mDstMax = info.max_value; }
-        if (!strcmp(info.name, "Mod 00 Amt 1"))  { mAmtId = info.id; }
+        if (!strcmp(info.name, "Mod 01 Source")) { mSrcId = info.id; mSrcMax = info.max_value; }
+        if (!strcmp(info.name, "Mod 01 Dest 1")) { mDstId = info.id; mDstMax = info.max_value; }
+        if (!strcmp(info.name, "Mod 01 Amt 1"))  { mAmtId = info.id; }
         // a param with a real range we can flip for the state roundtrip
         if (probeId == 0 && info.max_value > info.min_value + 1.0) {
             probeId = info.id; probeMin = info.min_value; probeMax = info.max_value;
@@ -248,7 +248,7 @@ int main(int argc, char **argv) {
     // negative amount; the modulated cutoff collapses and the (fully-open)
     // filter's output energy drops -- proving matrix modulation reaches the
     // master filter through the shell.
-    CHECK(mSrcId != ~0u && mDstId != ~0u && mAmtId != ~0u, "found Mod 00 row params");
+    CHECK(mSrcId != ~0u && mDstId != ~0u && mAmtId != ~0u, "found Mod 01 row params");
     auto setStep = [&](clap_id id, double maxv, int index, int count) {
         // IntParams may be exposed to CLAP as plain (max>1) or normalized.
         pushParam(0, id, maxv > 1.5 ? (double)index : (double)index / (count - 1));
