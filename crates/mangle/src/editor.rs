@@ -798,7 +798,7 @@ fn header_bar(
                         cell(ui, setter, &params.cp(Module::Global, 0, 4), "LEVEL", 104.0);
                         cell(ui, setter, &params.cp(Module::Global, 0, 5), "VOICES", 86.0);
                         let drone = params.cp(Module::Global, 0, 0).norm() >= 0.5
-                            && params.cp(Module::Global, 0, 1).norm() <= 0.0;
+                            && params.cp(Module::Global, 0, 1).norm() < crate::DRONE_KEY_MAX_NORM;
                         if drone {
                             let (r, _) = ui.allocate_exact_size(vec2(52.0, CELL_H), Sense::hover());
                             txt(ui, r.center(), Align2::CENTER_CENTER, "DRONE", 9.0, DIM);

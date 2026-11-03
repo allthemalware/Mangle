@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use mangle_dsp::sample::SampleSlot;
 use mangle_dsp::state::SlotRef;
 
-use crate::{summarize, MangleParams, PendingLoad, WaveSummary};
+use crate::{summarize, EmbeddedSample, MangleParams, PendingLoad, WaveSummary};
 
 /// Where a sample comes from.
 #[derive(Clone, Debug)]
@@ -21,6 +21,13 @@ pub enum LoadSource {
         bytes: Arc<Vec<u8>>,
         ext: Option<String>,
         path: String,
+    },
+    /// Hot-reload source: the worker reads `path` and uses it when its content
+    /// hash equals `hash`, otherwise decodes `embedded`.
+    FileOrEmbedded {
+        path: String,
+        hash: u64,
+        embedded: EmbeddedSample,
     },
 }
 
@@ -81,6 +88,39 @@ pub fn note(params: &MangleParams, msg: String) {
 /// Decode on the calling thread (file or embedded bytes) at `target_rate`.
 /// A missing file maps to `SlotStatus::Missing(path)`, other errors to `Failed(msg)`.
 pub fn decode(source: &LoadSource, target_rate: f32) -> Result<Decoded, SlotStatus> {
+    decode_resolved(&resolve(source).0, target_rate)
+}
+
+/// Settle a `FileOrEmbedded` source into a plain `File` or `Embedded` one by
+/// reading the file; the flag says the preset's embedded bytes were chosen.
+/// Reads and hashes the file: never call from the audio thread.
+fn resolve(source: &LoadSource) -> (LoadSource, bool) {
+    let LoadSource::FileOrEmbedded {
+        path,
+        hash,
+        embedded,
+    } = source
+    else {
+        return (source.clone(), false);
+    };
+    let file_matches = std::fs::read(path)
+        .map(|b| mangle_loader::hash_bytes(&b) == *hash)
+        .unwrap_or(false);
+    if file_matches {
+        (LoadSource::File(PathBuf::from(path)), false)
+    } else {
+        (
+            LoadSource::Embedded {
+                bytes: embedded.bytes.clone(),
+                ext: embedded.ext.clone(),
+                path: path.clone(),
+            },
+            true,
+        )
+    }
+}
+
+fn decode_resolved(source: &LoadSource, target_rate: f32) -> Result<Decoded, SlotStatus> {
     let (result, path) = match source {
         LoadSource::File(p) => (
             mangle_loader::load_sample(p, target_rate),
@@ -90,6 +130,7 @@ pub fn decode(source: &LoadSource, target_rate: f32) -> Result<Decoded, SlotStat
             mangle_loader::load_sample_from_bytes(bytes, ext.as_deref(), target_rate),
             path.clone(),
         ),
+        LoadSource::FileOrEmbedded { .. } => unreachable!("resolved before decoding"),
     };
     match result {
         Ok(loaded) => {
@@ -172,7 +213,9 @@ pub fn publish(params: &MangleParams, slot: usize, generation: u64, decoded: Dec
 fn source_name(source: &LoadSource) -> String {
     let path = match source {
         LoadSource::File(p) => p.to_string_lossy(),
-        LoadSource::Embedded { path, .. } => std::borrow::Cow::Borrowed(path.as_str()),
+        LoadSource::Embedded { path, .. } | LoadSource::FileOrEmbedded { path, .. } => {
+            std::borrow::Cow::Borrowed(path.as_str())
+        }
     };
     std::path::Path::new(path.as_ref())
         .file_name()
@@ -191,9 +234,13 @@ fn status_message(source: &LoadSource, status: &SlotStatus) -> String {
 
 fn load_and_publish(params: &MangleParams, slot: usize, generation: u64, source: &LoadSource) {
     let rate = f32::from_bits(params.sr_bits.load(Ordering::Relaxed));
-    match decode(source, rate) {
+    let (source, from_preset) = resolve(source);
+    let source = &source;
+    match decode_resolved(source, rate) {
         Ok(decoded) => {
-            publish(params, slot, generation, decoded);
+            if publish(params, slot, generation, decoded) && from_preset {
+                push_message(params, format!("slot {}: from preset", slot + 1));
+            }
         }
         Err(status) => {
             if params.loads.generation[slot].load(Ordering::Acquire) == generation {

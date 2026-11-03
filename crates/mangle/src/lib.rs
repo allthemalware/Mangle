@@ -59,6 +59,8 @@ pub mod loading;
 use feed::{EngineFeed, FeedFrame};
 
 /// Longest loop window, in seconds of the slot's sample.
+/// Key's normalized value below which Global On starts the drone.
+pub(crate) const DRONE_KEY_MAX_NORM: f32 = 1e-4;
 pub(crate) const MAX_LOOP_SECONDS: f32 = 100.0;
 
 /// Per-slot display data for the waveform strip (peaks of the mono mix).
@@ -149,8 +151,8 @@ pub struct MangleParams {
 pub type EmbedCacheEntry = (String, u64, Arc<Vec<u8>>);
 
 /// Original file bytes carried inside a preset.
-#[derive(Clone)]
-pub(crate) struct EmbeddedSample {
+#[derive(Clone, Debug)]
+pub struct EmbeddedSample {
     pub ext: Option<String>,
     pub hash: u64,
     pub bytes: Arc<Vec<u8>>,
@@ -627,7 +629,7 @@ impl Mangle {
         let on_pos = self.params.table.pos(mp::pid(Module::Global, 0, 0));
         let key_pos = self.params.table.pos(mp::pid(Module::Global, 0, 1));
         let wanted = self.base.values[on_pos] >= 0.5
-            && self.base.values[key_pos] < 1e-4
+            && self.base.values[key_pos] < DRONE_KEY_MAX_NORM
             && !self.vm.any_note_gated();
         if wanted && !self.vm.drone_mut().gate {
             let vr = self.rng.bipolar();
@@ -985,13 +987,21 @@ impl Mangle {
     /// is never stalled by file IO).
     /// The preset's embedded bytes for `slot`, when they match the ref's hash
     /// and the referenced file is missing or has different content.
-    fn embedded_source(&self, slot: usize, r: &SlotRef) -> Option<loading::LoadSource> {
+    fn embedded_source(&self, slot: usize, r: &SlotRef, cold: bool) -> Option<loading::LoadSource> {
         if r.content_hash == 0 {
             return None;
         }
         let e = self.params.embedded.lock().ok()?[slot].clone()?;
         if e.hash != r.content_hash {
             return None;
+        }
+        if !cold {
+            // The worker reads and hashes the file, not this thread.
+            return Some(loading::LoadSource::FileOrEmbedded {
+                path: r.path.clone(),
+                hash: r.content_hash,
+                embedded: e,
+            });
         }
         let on_disk = mangle_loader::hash_file(std::path::Path::new(&r.path)).ok();
         if on_disk == Some(r.content_hash) {
@@ -1028,16 +1038,13 @@ impl Mangle {
                 continue;
             }
             self.clear_slot(i);
-            let embedded = self.embedded_source(i, r);
-            let from_preset = embedded.is_some();
+            let embedded = self.embedded_source(i, r, cold);
+            let from_preset = cold && embedded.is_some();
             let source = embedded
                 .unwrap_or_else(|| loading::LoadSource::File(std::path::PathBuf::from(&r.path)));
             if !cold {
                 self.set_slot_status(i, loading::SlotStatus::Loading);
                 loading::spawn_load(self.params.clone(), i, source);
-                if from_preset {
-                    loading::note(&self.params, format!("slot {}: from preset", i + 1));
-                }
                 continue;
             }
             match loading::decode(&source, self.sample_rate) {
@@ -1075,10 +1082,15 @@ impl Mangle {
         }
         self.loaded_rate = self.sample_rate;
 
-        if cold && !any_ref && self.bank.loaded().1 == 0 {
+        if !any_ref && self.bank.loaded().1 == 0 {
             // Dev hook: MANGLE_SAMPLE=/path/to/file fills slot 1 and records
             // the reference in state.
-            if let Ok(p) = std::env::var("MANGLE_SAMPLE") {
+            let dev_sample = if cold {
+                std::env::var("MANGLE_SAMPLE").ok()
+            } else {
+                None
+            };
+            if let Some(p) = dev_sample {
                 match mangle_loader::load_sample(std::path::Path::new(&p), self.sample_rate) {
                     Ok(loaded) => {
                         nih_log!("Mangle: loaded MANGLE_SAMPLE '{}'", p);
@@ -2443,6 +2455,50 @@ mod tests {
         assert!(m.bank.slots[0].is_some());
         assert_eq!(m.loaded[0].0, b.to_string_lossy());
         assert_ne!(m.loaded[0].1, h);
+    }
+
+    #[test]
+    fn hot_sync_without_refs_installs_fallback_tone() {
+        let mut m = test_plugin();
+        m.sync_slots_with_state(false);
+        assert!(m.bank.slots[0].is_some());
+        assert!(m.params.waveforms.read().unwrap()[0].is_some());
+    }
+
+    #[test]
+    fn hot_sync_prefers_embedded_when_file_changed() {
+        let dir = sync_dir("hot-embed");
+        let wav = dir.join("a.wav");
+        write_test_wav(&wav, 2400);
+        let bytes = std::fs::read(&wav).unwrap();
+        let hash = mangle_loader::hash_bytes(&bytes);
+        let m = test_plugin();
+        set_ref(&m, 0, &wav, hash);
+        m.params.extra.write().unwrap().embed_samples = true;
+        let fields = m.params.serialize_fields();
+        write_test_wav(&wav, 4800);
+
+        let mut m = test_plugin();
+        m.params.deserialize_fields(&fields);
+        set_ref(&m, 0, &wav, hash);
+        m.sync_slots_with_state(false);
+        assert!(m.bank.slots[0].is_none());
+
+        let params = m.params.clone();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < end
+            && !params
+                .pending_loads
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|p| p.slot == 0 && !p.consumed)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let q = params.pending_loads.lock().unwrap();
+        let p = q.iter().find(|p| p.slot == 0).expect("pending load");
+        assert_eq!(p.content_hash, hash);
     }
 
     #[test]
