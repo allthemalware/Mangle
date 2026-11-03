@@ -85,6 +85,15 @@ pub struct VoiceManager {
     counter: u64,
 }
 
+/// A voice that `note_on` reused before the shell reported it ended; the shell
+/// sends CLAP NOTE_END for it so the host can recycle the note id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EndedVoice {
+    pub note_id: i32,
+    pub note: u8,
+    pub channel: u8,
+}
+
 impl VoiceManager {
     /// All 16 voices are allocated up front so `note_on` never allocates
     /// on the audio thread (grain pools, offset lists, scratch — all
@@ -106,6 +115,8 @@ impl VoiceManager {
 
     /// Allocate (or steal) a voice for a note-on. `voice_random` is rolled
     /// by the caller's RNG so the whole engine stays seed-deterministic.
+    /// Also returns the reused voice's old identity if it had not yet been
+    /// reported as ended.
     pub fn note_on(
         &mut self,
         note: u8,
@@ -113,7 +124,7 @@ impl VoiceManager {
         channel: u8,
         velocity: f32,
         voice_random: f32,
-    ) -> &mut Voice {
+    ) -> (&mut Voice, Option<EndedVoice>) {
         self.counter += 1;
         let stamp = self.counter;
 
@@ -137,6 +148,11 @@ impl VoiceManager {
         };
 
         let v = &mut self.voices[idx];
+        let ended = v.was_sounding.then_some(EndedVoice {
+            note_id: v.note_id,
+            note: v.note,
+            channel: v.channel,
+        });
         v.note = note;
         v.note_id = note_id;
         v.channel = channel;
@@ -159,16 +175,17 @@ impl VoiceManager {
         for lfo in v.loop_lfos.iter_mut() {
             *lfo = LfoState::default();
         }
-        v
+        (v, ended)
     }
 
-    /// Gate off the matching voice (by note id when given, else by note).
-    pub fn note_off(&mut self, note: u8, note_id: i32) {
+    /// Gate off the matching voice (by note id when given, else by note and
+    /// channel).
+    pub fn note_off(&mut self, note: u8, note_id: i32, channel: u8) {
         for v in self.voices.iter_mut() {
             let hit = if note_id >= 0 {
                 v.note_id == note_id
             } else {
-                v.note == note
+                v.note == note && v.channel == channel
             };
             if hit && v.gate {
                 v.gate = false;
@@ -223,7 +240,7 @@ mod tests {
         assert!(vm.voices[0].lanes[0].active_grains() > 0);
         assert!(vm.voices[1].lanes[0].active_grains() > 0);
         // Release the *newer* voice (64): gate off, but its tail still rings.
-        vm.note_off(64, 2);
+        vm.note_off(64, 2, 0);
         assert!(!vm.voices[1].gate && vm.voices[1].sounding());
         // A new note steals the released voice, sparing the older *held* note 60
         // (pure oldest-stealing would have taken 60 instead).
@@ -247,10 +264,10 @@ mod tests {
         let mut vm = VoiceManager::new(4, 1);
         vm.note_on(60, 11, 0, 0.8, 0.0);
         vm.note_on(60, 12, 0, 0.8, 0.0);
-        vm.note_off(60, 11);
+        vm.note_off(60, 11, 0);
         let gates: Vec<bool> = vm.voices.iter().map(|v| v.gate).collect();
         assert_eq!(gates.iter().filter(|g| **g).count(), 1);
-        vm.note_off(60, -1); // by note: kills the rest
+        vm.note_off(60, -1, 0); // by note: kills the rest
         assert_eq!(vm.voices.iter().filter(|v| v.gate).count(), 0);
     }
 
@@ -258,7 +275,7 @@ mod tests {
     fn released_voice_is_reused() {
         let mut vm = VoiceManager::new(8, 1);
         vm.note_on(60, 1, 0, 0.8, 0.0);
-        vm.note_off(60, 1);
+        vm.note_off(60, 1, 0);
         // No grains were ever spawned, so the voice is free and reused.
         vm.note_on(72, 2, 0, 0.8, 0.0);
         assert_eq!(vm.voices[0].note, 72);
@@ -277,9 +294,39 @@ mod offset_tests {
         vm.voices[0].set_mod_offset(42, 0.5);
         vm.voices[0].set_mod_offset(42, -0.25);
         assert_eq!(vm.voices[0].mod_offsets, vec![(42, -0.25)]);
-        vm.note_off(60, 1);
+        vm.note_off(60, 1, 0);
         vm.note_on(72, 2, 0, 0.8, 0.0);
         assert!(vm.voices[0].mod_offsets.is_empty());
         assert!(vm.voices[0].was_sounding);
+    }
+
+    #[test]
+    fn steal_reports_old_voice_and_free_reported_voice_does_not() {
+        let mut vm = VoiceManager::new(1, 1);
+        let (_, ended) = vm.note_on(60, 1, 3, 0.8, 0.0);
+        assert_eq!(ended, None);
+        let (_, ended) = vm.note_on(64, 2, 0, 0.8, 0.0);
+        assert_eq!(
+            ended,
+            Some(EndedVoice {
+                note_id: 1,
+                note: 60,
+                channel: 3
+            })
+        );
+        vm.note_off(64, 2, 0);
+        vm.voices[0].was_sounding = false;
+        let (_, ended) = vm.note_on(65, 3, 0, 0.8, 0.0);
+        assert_eq!(ended, None);
+    }
+
+    #[test]
+    fn note_off_by_note_matches_channel() {
+        let mut vm = VoiceManager::new(4, 1);
+        vm.note_on(60, -1, 0, 0.8, 0.0);
+        vm.note_on(60, -1, 1, 0.8, 0.0);
+        vm.note_off(60, -1, 1);
+        assert!(vm.voices[0].gate);
+        assert!(!vm.voices[1].gate);
     }
 }

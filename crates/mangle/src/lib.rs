@@ -48,7 +48,7 @@ const FILTER_TYPE_NAMES: [&str; 4] = ["LP", "BP", "HP", "Notch"];
 const CTRL_CHUNK: usize = 64;
 use mangle_dsp::state::SlotRef;
 use mangle_dsp::state::{self, ExtraState};
-use mangle_dsp::voice::VoiceManager;
+use mangle_dsp::voice::{Voice, VoiceManager};
 
 mod editor;
 pub mod feed;
@@ -367,8 +367,8 @@ pub struct Mangle {
     scratch_r: Patch,
     rows: [DecodedRow; 32],
     n_rows: usize,
-    /// MonoAutomation overrides for poly-modulatable params.
-    mono_overrides: Vec<(u32, f32)>,
+    /// Pitch bend per MIDI channel, in semitones.
+    bend: [f32; 16],
     squeeze: Squeeze,
     /// Master output filter, one SVF per channel (Module::Fx). Runs after the
     /// grain sum, before Squeeze.
@@ -413,7 +413,7 @@ impl Default for Mangle {
             base,
             rows: [DecodedRow::default(); 32],
             n_rows: 0,
-            mono_overrides: Vec::with_capacity(256),
+            bend: [0.0; 16],
             squeeze: Squeeze::new(48_000.0),
             filter: [Svf::default(); 2],
             filt_cutoff: [20_000.0; 2],
@@ -464,46 +464,57 @@ impl Mangle {
         }
     }
 
-    fn set_mono_override(&mut self, id: u32, value: f32) {
-        if let Some(e) = self.mono_overrides.iter_mut().find(|(i, _)| *i == id) {
-            e.1 = value;
-        } else if self.mono_overrides.len() < self.mono_overrides.capacity() {
-            self.mono_overrides.push((id, value));
-        }
-    }
-
     /// Apply one note/automation event. Called from the control-chunk loop at
     /// the event's sample offset so note timing is sample-accurate. `gate_sync`
     /// is the per-engine Gate-Sync flag set (resolved once from the base patch).
-    fn apply_event(&mut self, event: NoteEvent<()>, gate_sync: &[bool; 3]) {
+    fn apply_event<E: BlockEvents>(
+        &mut self,
+        event: NoteEvent<()>,
+        gate_sync: &[bool; 3],
+        io: &mut E,
+    ) {
         match event {
             NoteEvent::NoteOn {
+                timing,
                 note,
                 velocity,
                 voice_id,
                 channel,
-                ..
             } => {
                 let vr = self.rng.bipolar();
-                let v = self
-                    .vm
-                    .note_on(note, voice_id.unwrap_or(-1), channel, velocity, vr);
+                let (v, ended) =
+                    self.vm
+                        .note_on(note, voice_id.unwrap_or(-1), channel, velocity, vr);
+                if let Some(old) = ended.filter(|o| o.note_id >= 0) {
+                    io.send_event(NoteEvent::VoiceTerminated {
+                        timing,
+                        voice_id: Some(old.note_id),
+                        channel: old.channel,
+                        note: old.note,
+                    });
+                }
                 for (e, gs) in gate_sync.iter().enumerate() {
                     if *gs {
                         v.loop_lfos[e].trig();
                     }
                 }
             }
-            NoteEvent::NoteOff { note, voice_id, .. } => {
-                self.vm.note_off(note, voice_id.unwrap_or(-1));
+            NoteEvent::NoteOff {
+                note,
+                voice_id,
+                channel,
+                ..
+            } => {
+                self.vm.note_off(note, voice_id.unwrap_or(-1), channel);
             }
-            NoteEvent::Choke { voice_id, note, .. } => {
+            NoteEvent::Choke {
+                voice_id,
+                note,
+                channel,
+                ..
+            } => {
                 for v in self.vm.voices.iter_mut() {
-                    let hit = match voice_id {
-                        Some(id) => v.note_id == id,
-                        None => v.note == note,
-                    };
-                    if hit {
+                    if voice_matches(v, voice_id, note, channel) {
                         v.gate = false;
                         for lane in v.lanes.iter_mut() {
                             lane.reset();
@@ -514,18 +525,18 @@ impl Mangle {
             NoteEvent::PolyPressure {
                 voice_id,
                 note,
+                channel,
                 pressure,
                 ..
             } => {
                 for v in self.vm.voices.iter_mut() {
-                    let hit = match voice_id {
-                        Some(id) => v.note_id == id,
-                        None => v.note == note,
-                    };
-                    if hit {
+                    if voice_matches(v, voice_id, note, channel) {
                         v.pressure = pressure;
                     }
                 }
+            }
+            NoteEvent::MidiPitchBend { channel, value, .. } => {
+                self.bend[(channel & 15) as usize] = (value - 0.5) * 2.0 * PITCH_BEND_RANGE_ST;
             }
             NoteEvent::MidiChannelPressure { pressure, .. } => {
                 for v in self.vm.voices.iter_mut() {
@@ -537,15 +548,12 @@ impl Mangle {
             NoteEvent::PolyTuning {
                 voice_id,
                 note,
+                channel,
                 tuning,
                 ..
             } => {
                 for v in self.vm.voices.iter_mut() {
-                    let hit = match voice_id {
-                        Some(id) => v.note_id == id,
-                        None => v.note == note,
-                    };
-                    if hit {
+                    if voice_matches(v, voice_id, note, channel) {
                         v.tuning = tuning;
                     }
                 }
@@ -553,15 +561,12 @@ impl Mangle {
             NoteEvent::PolyVolume {
                 voice_id,
                 note,
+                channel,
                 gain,
                 ..
             } => {
                 for v in self.vm.voices.iter_mut() {
-                    let hit = match voice_id {
-                        Some(id) => v.note_id == id,
-                        None => v.note == note,
-                    };
-                    if hit {
+                    if voice_matches(v, voice_id, note, channel) {
                         v.expr_volume = gain.max(0.0);
                     }
                 }
@@ -569,15 +574,12 @@ impl Mangle {
             NoteEvent::PolyPan {
                 voice_id,
                 note,
+                channel,
                 pan,
                 ..
             } => {
                 for v in self.vm.voices.iter_mut() {
-                    let hit = match voice_id {
-                        Some(id) => v.note_id == id,
-                        None => v.note == note,
-                    };
-                    if hit {
+                    if voice_matches(v, voice_id, note, channel) {
                         v.expr_pan = pan.clamp(-1.0, 1.0);
                     }
                 }
@@ -592,15 +594,22 @@ impl Mangle {
                     v.set_mod_offset(poly_modulation_id, normalized_offset);
                 }
             }
-            NoteEvent::MonoAutomation {
-                poly_modulation_id,
-                normalized_value,
-                ..
-            } => {
-                self.set_mono_override(poly_modulation_id, normalized_value);
-            }
+            // nih-plug has already written the value into the parameter.
+            NoteEvent::MonoAutomation { .. } => {}
             _ => {}
         }
+    }
+}
+
+/// Pitch-bend range in semitones for a full-scale MIDI bend.
+const PITCH_BEND_RANGE_ST: f32 = 2.0;
+
+/// Whether a voice is the target of a per-note event: by voice id when the host
+/// gave one, else by note and channel.
+fn voice_matches(v: &Voice, voice_id: Option<i32>, note: u8, channel: u8) -> bool {
+    match voice_id {
+        Some(id) => v.note_id == id,
+        None => v.note == note && v.channel == channel,
     }
 }
 
@@ -626,7 +635,7 @@ impl Plugin for Mangle {
         ..AudioIOLayout::const_default()
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
+    const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
@@ -726,7 +735,7 @@ impl Plugin for Mangle {
                 lane.reset();
             }
         }
-        self.mono_overrides.clear();
+        self.bend = [0.0; 16];
         self.squeeze.reset();
     }
 
@@ -746,13 +755,8 @@ impl Plugin for Mangle {
         };
         self.sync_gui_state();
 
-        // 1. Host params → base patch (+ mono-modulation overrides).
+        // 1. Host params → base patch.
         self.params.read_into(&mut self.base);
-        for (id, v) in self.mono_overrides.iter() {
-            if let Some(pos) = self.params.table.try_pos(*id) {
-                self.base.values[pos] = *v;
-            }
-        }
 
         let output = buffer.as_slice();
         let (first, second) = output.split_at_mut(1);
@@ -803,6 +807,7 @@ impl Mangle {
             f.clear();
         }
         self.smooth_coef = 1.0 - (-1.0f32 / (0.005 * self.sample_rate)).exp();
+        self.bend = [0.0; 16];
         mangle_dsp::sample::warm_tables(); // no lazy alloc on the audio thread
         mangle_dsp::spectral::warm(); // pre-build the spectral FFT plan + window
     }
@@ -866,6 +871,14 @@ impl Mangle {
         // nothing hangs over the parameter change.
         if self.params.panic.swap(false, Ordering::AcqRel) {
             for v in self.vm.voices.iter_mut() {
+                if v.was_sounding && v.note_id >= 0 {
+                    io.send_event(NoteEvent::VoiceTerminated {
+                        timing: 0,
+                        voice_id: Some(v.note_id),
+                        channel: v.channel,
+                        note: v.note,
+                    });
+                }
                 v.gate = false;
                 v.was_sounding = false;
                 for lane in v.lanes.iter_mut() {
@@ -947,7 +960,7 @@ impl Mangle {
                 if (ev.timing() as usize) > off {
                     break;
                 }
-                self.apply_event(ev, &gate_sync);
+                self.apply_event(ev, &gate_sync, io);
                 next_event = io.next_event();
             }
             let seg_end = segment_end(
@@ -1020,7 +1033,8 @@ impl Mangle {
                     .extend_from_slice(&self.scratch_v.values);
                 apply_voice(&mut self.scratch_r, rows, &sv, 1, &mut loop_pos_r);
 
-                let note = voice.note as f32 + voice.tuning;
+                let note =
+                    voice.note as f32 + voice.tuning + self.bend[(voice.channel & 15) as usize];
                 // Note-expression Volume/Pan (parameter map §10): a per-voice
                 // gain plus a balance pan (center = unity, so a voice with no
                 // expression is untouched), applied to each lane's level.
@@ -1129,7 +1143,7 @@ impl Mangle {
         // Apply any events at/after the final sample so none are dropped (their
         // state carries into the next block).
         while let Some(ev) = next_event {
-            self.apply_event(ev, &gate_sync);
+            self.apply_event(ev, &gate_sync, io);
             next_event = io.next_event();
         }
 
@@ -1347,6 +1361,93 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    fn note_on_id(id: i32) -> NoteEvent<()> {
+        NoteEvent::NoteOn {
+            timing: 0,
+            voice_id: Some(id),
+            channel: 0,
+            note: 45,
+            velocity: 0.8,
+        }
+    }
+
+    fn terminated(io: &Scripted, id: i32) -> usize {
+        io.sent
+            .iter()
+            .filter(
+                |e| matches!(e, NoteEvent::VoiceTerminated { voice_id: Some(v), .. } if *v == id),
+            )
+            .count()
+    }
+
+    #[test]
+    fn stolen_voice_reports_note_end() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        let mut l = vec![0.0f32; 512];
+        let mut r = vec![0.0f32; 512];
+        let pos = m.params.table.pos(mp::pid(Module::Global, 0, 5));
+        for id in [1, 2] {
+            m.params.read_into(&mut m.base);
+            m.base.values[pos] = 0.0; // Voices = 1
+            io.input.push_back(note_on_id(id));
+            m.render_block(&mut l, &mut r, BlockTransport::default(), &mut io);
+        }
+        assert_eq!(terminated(&io, 1), 1);
+        assert_eq!(terminated(&io, 2), 0);
+    }
+
+    #[test]
+    fn panic_reports_note_end() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        let mut out = Vec::new();
+        io.input.push_back(note_on_id(3));
+        render(&mut m, &mut io, &mut out, 512, 512);
+        m.params.panic.store(true, Ordering::Release);
+        render(&mut m, &mut io, &mut out, 512, 512);
+        assert_eq!(terminated(&io, 3), 1);
+    }
+
+    #[test]
+    fn pitch_bend_changes_pitch() {
+        let run = |bend: bool| {
+            let mut m = test_plugin();
+            let mut io = Scripted::default();
+            if bend {
+                io.input.push_back(NoteEvent::MidiPitchBend {
+                    timing: 0,
+                    channel: 0,
+                    value: 1.0,
+                });
+            }
+            io.input.push_back(note_on());
+            let mut out = Vec::new();
+            render(&mut m, &mut io, &mut out, 4096, 512);
+            (m.bend[0], out)
+        };
+        let (b, bent) = run(true);
+        let (z, plain) = run(false);
+        assert_eq!(b, 2.0);
+        assert_eq!(z, 0.0);
+        assert_ne!(bent, plain);
+    }
+
+    #[test]
+    fn channel_pressure_reaches_gated_voices() {
+        let mut m = test_plugin();
+        let mut io = Scripted::default();
+        let mut out = Vec::new();
+        io.input.push_back(note_on());
+        io.input.push_back(NoteEvent::MidiChannelPressure {
+            timing: 0,
+            channel: 0,
+            pressure: 0.75,
+        });
+        render(&mut m, &mut io, &mut out, 512, 512);
+        assert!(m.vm.voices.iter().any(|v| v.gate && v.pressure == 0.75));
     }
 
     #[test]
