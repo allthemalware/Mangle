@@ -31,8 +31,8 @@ use mangle_dsp::engine::{MODE_NAMES, QUANT_NAMES};
 use mangle_dsp::filter::Svf;
 use mangle_dsp::matrix;
 use mangle_dsp::modengine::{
-    apply_global, apply_voice, decode_matrix, fill_voice_sources, modulated_filter, DecodedRow,
-    GlobalMod, SourceValues, VoiceSourceInputs,
+    apply_global, apply_voice, decode_matrix, fill_global_voice_sources, fill_voice_sources,
+    modulated_filter, DecodedRow, GlobalMod, SourceValues, VoiceSourceInputs,
 };
 use mangle_dsp::params::{self as mp, flags, Map, Module, ParamInfo, ParamTable, Patch};
 use mangle_dsp::resolve;
@@ -381,6 +381,8 @@ pub struct Mangle {
     /// modulated, per-channel) target across control chunks so sweeps don't
     /// zipper. Two values so stereo filter modulation diverges L/R.
     filt_cutoff: [f32; 2],
+    /// Smoothed filter resonance (0..1) per channel, same smoothing as the cutoff.
+    filt_reso: [f32; 2],
     /// Smoothed master Level / Stereo width. The map's ~5 ms smoothing contract
     /// covers these continuous, non-grain params; applying the resolved value
     /// per block unramped would zipper on automation.
@@ -421,6 +423,7 @@ impl Default for Mangle {
             squeeze: Squeeze::new(48_000.0),
             filter: [Svf::default(); 2],
             filt_cutoff: [20_000.0; 2],
+            filt_reso: [0.0; 2],
             cur_level: 1.0,
             cur_stereo: 1.0,
             smooth_coef: 1.0 - (-1.0f32 / (0.005 * 48_000.0)).exp(),
@@ -955,6 +958,10 @@ impl Mangle {
         // self.rows. DecodedRow is Copy — see mangle-borrow-fallback.md.
         let rows_buf = self.rows;
         let rows = &rows_buf[..self.n_rows];
+        let fo = resolve::filter_out(&self.base, &self.params.table);
+        let filt_cut_pos = self.params.table.pos(mp::pid(Module::Fx, 0, 2));
+        let filt_res_pos = self.params.table.pos(mp::pid(Module::Fx, 0, 3));
+        let filt_cut_map = self.params.table.infos[filt_cut_pos].map;
         let mut off = 0usize;
         let mut next_event = io.next_event();
         while off < block {
@@ -987,8 +994,28 @@ impl Mangle {
 
             // Global pass: last-tick sources modulate global LFO params,
             // then the sources advance one control tick.
+            let last_vi = self
+                .vm
+                .voices
+                .iter()
+                .filter(|v| v.gate)
+                .max_by_key(|v| v.stamp)
+                .map(|v| VoiceSourceInputs {
+                    velocity: v.velocity,
+                    note: v.note,
+                    gate: v.gate,
+                    pressure: v.pressure,
+                    voice_random: v.voice_random,
+                    loop_lfo: v.last_scan,
+                });
             let mut sv_pre = SourceValues::zero();
             self.gmod.fill_sources(&mut sv_pre);
+            fill_global_voice_sources(
+                &mut sv_pre,
+                last_vi.as_ref(),
+                &self.base,
+                &self.params.table,
+            );
             self.scratch_g.values.clear();
             self.scratch_g.values.extend_from_slice(&self.base.values);
             apply_global(&mut self.scratch_g, rows, &sv_pre);
@@ -1002,6 +1029,12 @@ impl Mangle {
             );
             let mut sv_template = SourceValues::zero();
             self.gmod.fill_sources(&mut sv_template);
+            fill_global_voice_sources(
+                &mut sv_template,
+                last_vi.as_ref(),
+                &self.base,
+                &self.params.table,
+            );
 
             for voice in self.vm.voices.iter_mut() {
                 if !voice.sounding() {
@@ -1142,6 +1175,52 @@ impl Mangle {
                     eng_peak[e] = eng_peak[e].max(sl.abs()).max(sr.abs());
                 }
             }
+
+            // Stereo width, then the master filter, over this segment so
+            // filter modulation follows the control rate, not the host block.
+            for i in off..seg_end {
+                self.cur_stereo += (g.stereo - self.cur_stereo) * self.smooth_coef;
+                let (l, r) = (out_l[i], out_r[i]);
+                let mid = 0.5 * (l + r);
+                let side = 0.5 * (l - r) * self.cur_stereo;
+                out_l[i] = mid + side;
+                out_r[i] = mid - side;
+            }
+            if fo.on {
+                let modf = modulated_filter(
+                    &self.base,
+                    rows,
+                    &sv_template,
+                    filt_cut_pos as u16,
+                    filt_res_pos as u16,
+                );
+                let coef = 1.0 - (-(n as f32) / (0.005 * self.sample_rate)).exp();
+                for (ch, &(cut, res)) in modf.iter().enumerate() {
+                    let target = filt_cut_map.to_display(cut);
+                    self.filt_cutoff[ch] += (target - self.filt_cutoff[ch]) * coef;
+                    self.filt_reso[ch] += (res - self.filt_reso[ch]) * coef;
+                    self.filter[ch].set(self.filt_cutoff[ch], self.filt_reso[ch], self.sample_rate);
+                }
+                for i in off..seg_end {
+                    out_l[i] = self.filter[0].process(out_l[i], fo.ftype);
+                    out_r[i] = self.filter[1].process(out_r[i], fo.ftype);
+                }
+            } else {
+                // Keep the smoothers tracking the target and states clear so
+                // the first segment after enabling starts from the right
+                // cutoff, silent.
+                let modf = modulated_filter(
+                    &self.base,
+                    rows,
+                    &sv_template,
+                    filt_cut_pos as u16,
+                    filt_res_pos as u16,
+                );
+                self.filt_cutoff = [fo.cutoff; 2];
+                self.filt_reso = [modf[0].1, modf[1].1];
+                self.filter[0].clear();
+                self.filter[1].clear();
+            }
             off += n;
         }
         // Apply any events at/after the final sample so none are dropped (their
@@ -1166,63 +1245,10 @@ impl Mangle {
             }
         }
 
-        // 9. Stereo width (mid/side) → filter → Squeeze → master level. Level
-        //    and width are smoothed per sample (~5 ms) so automation doesn't
-        //    zipper.
+        // 9. Squeeze → master level (stereo width and the master filter ran
+        //    per control chunk above). Level is smoothed per sample (~5 ms) so
+        //    automation doesn't zipper.
         let coef = self.smooth_coef;
-        for n in 0..block {
-            self.cur_stereo += (g.stereo - self.cur_stereo) * coef;
-            let l = out_l[n];
-            let r = out_r[n];
-            let mid = 0.5 * (l + r);
-            let side = 0.5 * (l - r) * self.cur_stereo;
-            out_l[n] = mid + side;
-            out_r[n] = mid - side;
-        }
-        // Master filter (Module::Fx): On/Type from the base patch; Cutoff/Reso
-        // are matrix-modulated *per channel* (an LFO with St.Phase sweeps L and
-        // R divergently). The cutoff is smoothed per channel and coefficients
-        // refresh each control chunk (tan is too costly per sample).
-        let fo = resolve::filter_out(&self.base, &self.params.table);
-        if fo.on {
-            let cut_pos = self.params.table.pos(mp::pid(Module::Fx, 0, 2));
-            let res_pos = self.params.table.pos(mp::pid(Module::Fx, 0, 3));
-            let cut_map = self.params.table.infos[cut_pos].map;
-            // End-of-block source values drive the per-block filter target.
-            let mut sv = SourceValues::zero();
-            self.gmod.fill_sources(&mut sv);
-            let modf = modulated_filter(
-                &self.base,
-                &self.rows[..self.n_rows],
-                &sv,
-                cut_pos as u16,
-                res_pos as u16,
-            );
-            let target_hz = [cut_map.to_display(modf[0].0), cut_map.to_display(modf[1].0)];
-            let reso = [modf[0].1, modf[1].1];
-            let ctrl = CTRL_CHUNK;
-            let cutoff_coef = 1.0 - (-(ctrl as f32) / (0.005 * self.sample_rate)).exp();
-            let mut off = 0;
-            while off < block {
-                let end = (off + ctrl).min(block);
-                for (cutoff, &target) in self.filt_cutoff.iter_mut().zip(target_hz.iter()) {
-                    *cutoff += (target - *cutoff) * cutoff_coef;
-                }
-                self.filter[0].set(self.filt_cutoff[0], reso[0], self.sample_rate);
-                self.filter[1].set(self.filt_cutoff[1], reso[1], self.sample_rate);
-                for n in off..end {
-                    out_l[n] = self.filter[0].process(out_l[n], fo.ftype);
-                    out_r[n] = self.filter[1].process(out_r[n], fo.ftype);
-                }
-                off = end;
-            }
-        } else {
-            // Keep the smoother tracking the target and states clear so the first
-            // block after enabling starts from the right cutoff, silent.
-            self.filt_cutoff = [fo.cutoff; 2];
-            self.filter[0].clear();
-            self.filter[1].clear();
-        }
         if g.squeeze {
             self.squeeze.process(out_l, out_r);
         }
@@ -1479,6 +1505,125 @@ mod tests {
             (lo, ro)
         };
         assert_eq!(run(512), run(64));
+    }
+
+    /// Write one matrix row (source → one destination) into `base`.
+    fn set_matrix_row(
+        m: &mut Mangle,
+        row: u8,
+        src: matrix::ModSource,
+        amt: f32,
+        dest: matrix::ModDest,
+    ) {
+        let t = &m.params.table;
+        let p = t.pos(mp::pid(Module::Matrix, row, 0));
+        let s = (matrix::SOURCE_COUNT - 1) as f32;
+        let d = (matrix::DEST_COUNT - 1) as f32;
+        m.base.values[p] = matrix::source_to_index(src) as f32 / s;
+        m.base.values[p + 1] = (amt + 100.0) / 200.0;
+        m.base.values[p + 2] = matrix::dest_to_index(dest) as f32 / d;
+    }
+
+    /// Render with `setup` applied to the freshly read base before each block.
+    fn render_setup(
+        m: &mut Mangle,
+        io: &mut Scripted,
+        samples: usize,
+        bs: usize,
+        setup: &dyn Fn(&mut Mangle),
+    ) -> Vec<f32> {
+        let mut out = Vec::new();
+        let mut l = vec![0.0f32; bs];
+        let mut r = vec![0.0f32; bs];
+        for _ in 0..samples / bs {
+            m.params.read_into(&mut m.base);
+            setup(m);
+            m.render_block(&mut l, &mut r, BlockTransport::default(), io);
+            out.extend_from_slice(&l);
+            out.extend_from_slice(&r);
+        }
+        out
+    }
+
+    fn filter_on_lp(m: &mut Mangle, cutoff: f32) {
+        let t = &m.params.table;
+        let on = t.pos(mp::pid(Module::Fx, 0, 0));
+        let ty = t.pos(mp::pid(Module::Fx, 0, 1));
+        let cut = t.pos(mp::pid(Module::Fx, 0, 2));
+        m.base.values[on] = 1.0;
+        m.base.values[ty] = 0.0;
+        m.base.values[cut] = cutoff;
+    }
+
+    #[test]
+    fn macro_reaches_master_filter() {
+        let run = |with_row: bool| {
+            let mut m = test_plugin();
+            let mut io = Scripted::default();
+            io.input.push_back(note_on());
+            let out = render_setup(&mut m, &mut io, 16384, 512, &|m| {
+                filter_on_lp(m, 0.5);
+                let mac = m.params.table.pos(mp::pid(Module::Macro, 0, 0));
+                m.base.values[mac] = 1.0;
+                if with_row {
+                    set_matrix_row(
+                        m,
+                        0,
+                        matrix::ModSource::Macro(0),
+                        -100.0,
+                        matrix::ModDest::Fx(matrix::FxDest::Cutoff),
+                    );
+                }
+            });
+            (out.iter().map(|s| s * s).sum::<f32>() / out.len() as f32).sqrt()
+        };
+        let with = run(true);
+        let without = run(false);
+        assert!(without > 0.001, "rms {without}");
+        assert!(with < 0.3 * without, "with {with} without {without}");
+    }
+
+    #[test]
+    fn filter_modulation_is_block_size_invariant() {
+        let run = |bs: usize| {
+            let mut m = test_plugin();
+            let mut io = Scripted::default();
+            io.input.push_back(note_on());
+            render_setup(&mut m, &mut io, 16384, bs, &|m| {
+                filter_on_lp(m, 0.5);
+                let rate = m.params.table.pos(mp::pid(Module::Lfo, 0, 2));
+                m.base.values[rate] = 0.7368;
+                set_matrix_row(
+                    m,
+                    0,
+                    matrix::ModSource::Lfo(0),
+                    60.0,
+                    matrix::ModDest::Fx(matrix::FxDest::Cutoff),
+                );
+            })
+        };
+        let a = run(1024);
+        let b = run(64);
+        // Interleave differs per block layout; compare per-channel streams.
+        let split = |v: &[f32], bs: usize| {
+            let mut l = Vec::new();
+            let mut r = Vec::new();
+            for c in v.chunks(bs * 2) {
+                l.extend_from_slice(&c[..bs]);
+                r.extend_from_slice(&c[bs..]);
+            }
+            (l, r)
+        };
+        let (al, ar) = split(&a, 1024);
+        let (bl, br) = split(&b, 64);
+        assert!(al.iter().any(|s| s.abs() > 0.001));
+        let d = al
+            .iter()
+            .zip(&bl)
+            .chain(ar.iter().zip(&br))
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max);
+        assert!(d < 1e-5, "max diff {d}");
     }
 
     #[test]

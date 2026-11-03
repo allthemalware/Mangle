@@ -219,7 +219,8 @@ pub fn apply_voice(
 }
 
 /// Global pass: parameters of the six global LFOs, left channel, once per
-/// block. Voice-local source slots should be zero in `sv` here.
+/// block. Voice-local source slots in `sv` should be filled with
+/// [`fill_global_voice_sources`] first.
 pub fn apply_global(patch: &mut Patch, rows: &[DecodedRow], sv: &SourceValues) {
     for row in rows {
         let c = contribution(row, sv, 0);
@@ -435,6 +436,40 @@ pub fn fill_voice_sources(
     sv.set(ModSource::NoteGate, g, g);
     sv.set(ModSource::Pressure, vi.pressure, vi.pressure);
     sv.set(ModSource::VoiceRandom, vi.voice_random, vi.voice_random);
+}
+
+/// Fill the voice-local source slots for global-scope destinations (the six
+/// global LFOs and the master filter): Macros from `base` (host values, no
+/// per-note offsets); Velocity, Note, Note Oct, Note Gate, Pressure, Voice
+/// Random and Loop LFOs from `last` — the most recently started voice that is
+/// still gated — or zero when no voice is held.
+pub fn fill_global_voice_sources(
+    sv: &mut SourceValues,
+    last: Option<&VoiceSourceInputs>,
+    base: &Patch,
+    table: &ParamTable,
+) {
+    if let Some(vi) = last {
+        fill_voice_sources(sv, vi, base, table);
+        return;
+    }
+    for m in 0..8u8 {
+        let v = base.values[table.pos(pid(Module::Macro, m, 0))] * 2.0 - 1.0;
+        sv.set(ModSource::Macro(m), v, v);
+    }
+    for i in 0..3u8 {
+        sv.set(ModSource::LoopLfo(i), 0.0, 0.0);
+    }
+    for s in [
+        ModSource::Velocity,
+        ModSource::Note,
+        ModSource::NoteOct,
+        ModSource::NoteGate,
+        ModSource::Pressure,
+        ModSource::VoiceRandom,
+    ] {
+        sv.set(s, 0.0, 0.0);
+    }
 }
 
 #[cfg(test)]
@@ -810,5 +845,68 @@ mod tests {
             "trig_lfo should restart the one-shot"
         );
         g.trig_lfo(99); // out of range: ignored
+    }
+
+    #[test]
+    fn global_voice_sources_reach_filter_and_global_lfo() {
+        let (t, mut p) = setup();
+        p.values[t.pos(pid(Module::Macro, 0, 0))] = 1.0;
+        set_row(
+            &mut p,
+            &t,
+            0,
+            ModSource::Macro(0),
+            50.0,
+            ModDest::Fx(FxDest::Cutoff),
+            0.0,
+            ModDest::None,
+            ModSource::None,
+        );
+        set_row(
+            &mut p,
+            &t,
+            1,
+            ModSource::Velocity,
+            40.0,
+            ModDest::Lfo(0, LfoDest::Rate),
+            0.0,
+            ModDest::None,
+            ModSource::None,
+        );
+        let mut rows = [DecodedRow::default(); 32];
+        let n = decode_matrix(&p, &t, &mut rows);
+        let rows = &rows[..n];
+        let cut = t.pos(pid(Module::Fx, 0, 2)) as u16;
+        let res = t.pos(pid(Module::Fx, 0, 3)) as u16;
+        let rate = t.pos(pid(Module::Lfo, 0, 2));
+        p.values[cut as usize] = 0.5;
+        let g = GlobalMod::new(1);
+        let vi = VoiceSourceInputs {
+            velocity: 1.0,
+            note: 60,
+            gate: true,
+            pressure: 0.0,
+            voice_random: 0.0,
+            loop_lfo: [(0.0, 0.0); 3],
+        };
+
+        let mut sv = SourceValues::zero();
+        g.fill_sources(&mut sv);
+        fill_global_voice_sources(&mut sv, Some(&vi), &p, &t);
+        let m = modulated_filter(&p, rows, &sv, cut, res);
+        assert_eq!(m[0].0, 1.0);
+        assert_eq!(m[1].0, 1.0);
+        let mut gp = p.clone();
+        apply_global(&mut gp, rows, &sv);
+        assert!((gp.values[rate] - p.values[rate] - 0.4).abs() < 1e-6);
+
+        let mut sv = SourceValues::zero();
+        g.fill_sources(&mut sv);
+        fill_global_voice_sources(&mut sv, None, &p, &t);
+        let m = modulated_filter(&p, rows, &sv, cut, res);
+        assert_eq!(m[0].0, 1.0);
+        let mut gp = p.clone();
+        apply_global(&mut gp, rows, &sv);
+        assert_eq!(gp.values[rate], p.values[rate]);
     }
 }
