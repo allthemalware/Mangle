@@ -1,0 +1,125 @@
+name: Release
+
+# Push a tag such as v0.1.0 to publish a GitHub release with prebuilt
+# plugins for Linux, Windows and macOS. "Run workflow" builds the same
+# artifacts without publishing, to check the pipeline.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: ""
+          - name: windows-x86_64
+            os: windows-latest
+            target: ""
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+      - name: Install system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libgl-dev libjack-jackd2-dev libx11-xcb-dev \
+            libxcb1-dev libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev \
+            libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev libwayland-dev g++
+      - name: Bundle
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo xtask bundle mangle --release --target ${{ matrix.target }}
+          else
+            cargo xtask bundle mangle --release
+          fi
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="mangle-${{ matrix.name }}"
+          mkdir -p "$out"
+          cp -R target/bundled/mangle.clap "$out/"
+          cp LICENSE "$out/"
+          cp -R factory "$out/factory"
+          rm -f "$out"/factory/sources/*.flac
+          cp tools/install-prebuilt.sh tools/install-prebuilt.ps1 "$out/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$out.zip" "$out" > /dev/null
+          else
+            zip -qr "$out.zip" "$out"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mangle-${{ matrix.name }}
+          path: mangle-${{ matrix.name }}.zip
+
+  # The recordings and synthesised sources are ~235 MB and rebuilt from
+  # scripts, so they ship as one separate download rather than in every
+  # plugin archive.
+  factory-bank:
+    name: Factory bank
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl python3
+      - name: Build bank
+        run: bash tools/build_factory.sh
+      - name: Package
+        run: |
+          mkdir -p bank
+          cp -R factory bank/factory
+          cd bank && zip -qr ../mangle-factory-bank.zip factory
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mangle-factory-bank
+          path: mangle-factory-bank.zip
+
+  publish:
+    name: Publish release
+    needs: [build, factory-bank]
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/*.zip \
+            --repo "${{ github.repository }}" \
+            --title "Mangle ${{ github.ref_name }}" \
+            --generate-notes

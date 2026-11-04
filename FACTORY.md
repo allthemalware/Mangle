@@ -39,4 +39,4 @@ A slot reference to a factory source has the path `factory:<id>` (e.g. `factory:
 State v3 (append-only) carries the persisted pre-RND patch, the A/B compare patch, and the last factory preset id; see `state.rs`.
 
 ## Data folder lookup (shell)
-`$MANGLE_DATA` if set and containing `factory/`, else `$XDG_DATA_HOME/mangle` (default `~/.local/share/mangle`), else `<dir of the plugin binary>/mangle`.
+`$MANGLE_DATA` if set and containing `factory/`, else `$XDG_DATA_HOME/mangle` (default `~/.local/share/mangle` on Linux, `~/Library/Application Support/mangle` on macOS, `%APPDATA%\\mangle` on Windows), else `<dir of the plugin binary>/mangle`.

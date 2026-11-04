@@ -22,10 +22,30 @@ the Torsion Texture Lab, minus the rack.
 - **A CLAP host.** Developed and tested against **Bitwig**; any CLAP-capable
   host (Bitwig, Reaper 7+, Qtractor, …) should work.
 - **Rust (current stable)** to build the plugin — install via [rustup](https://rustup.rs).
-- **Linux** is the tested platform (developed on Arch). It should also build
-  on macOS/Windows via the same command, but those are untested — reports welcome.
+- **Linux** is the tested platform (developed on Arch). Windows and macOS builds are
+  produced by CI but untested by hand — reports welcome.
 
-## Build & install
+## Install
+
+**Prebuilt (easiest).** Download the archive for your system from the
+[Releases page](https://github.com/allthemalware/Mangle/releases/latest), unzip it and run
+`install-prebuilt.sh` (Linux, macOS) or `install-prebuilt.ps1` (Windows). Also download
+`mangle-factory-bank.zip` and unzip it into your Mangle data folder to get the full set of
+factory sounds (see `FACTORY.md` for the folder). macOS builds are unsigned: the script clears
+the quarantine flag, or right-click the plugin and choose Open.
+
+**Build from source, one command.** Clone the repo, then:
+
+```sh
+bash install.sh                                              # Linux, macOS
+powershell -ExecutionPolicy Bypass -File .\install.ps1       # Windows
+```
+
+It asks one question (install here? Y/n), installs Rust if needed, builds, copies the plugin
+into your user CLAP folder and downloads the factory sounds. `--yes` skips the question and
+`--no-factory` skips the 235 MB download. Windows needs the Visual Studio Build Tools (C++ workload).
+
+## Build & install manually
 
 From the repo root:
 

@@ -9,10 +9,24 @@ use mangle_dsp::factory::{parse_preset, parse_sources, PresetFile, SourceEntry};
 pub fn data_dir() -> Option<PathBuf> {
     find_data_dir(
         std::env::var_os("MANGLE_DATA").map(PathBuf::from),
-        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from),
+        platform_data_home(),
         std::env::var_os("HOME").map(PathBuf::from),
         std::env::current_exe().ok(),
     )
+}
+
+/// The per-user data folder for this OS (`$XDG_DATA_HOME` wins when set).
+fn platform_data_home() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("XDG_DATA_HOME") {
+        return Some(PathBuf::from(p));
+    }
+    if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
+    } else {
+        None
+    }
 }
 
 fn find_data_dir(
