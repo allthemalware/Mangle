@@ -3,7 +3,9 @@ use mangle_dsp::state::{self, ExtraState, SlotRef, Snapshot};
 
 fn snap(seed: f32) -> Snapshot {
     let mut s = Snapshot {
-        values: (0..40).map(|i| ((i as f32 * 0.037 + seed) % 1.0).abs()).collect(),
+        values: (0..40)
+            .map(|i| ((i as f32 * 0.037 + seed) % 1.0).abs())
+            .collect(),
         slot_refs: Default::default(),
     };
     s.slot_refs[1] = Some(SlotRef {

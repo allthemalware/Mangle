@@ -28,10 +28,13 @@ fn rejects_bad_sources() {
         "00x1\tA\tc\tgen\tf\t60\tgenerated\to\n",
         "0001\tA\tc\tbogus\tf\t60\tgenerated\to\n",
         "0001\tA\tc\tgen\tf\t200\tgenerated\to\n", // root out of range
-        "0001\tA\tc\tgen\tf\t60\n",               // too few columns
+        "0001\tA\tc\tgen\tf\t60\n",                // too few columns
         "0001\tA\tc\tgen\t../x\t60\tgenerated\to\n", // escapes the folder
     ] {
-        assert!(factory::parse_sources(&format!("{head}{bad}")).is_err(), "{bad}");
+        assert!(
+            factory::parse_sources(&format!("{head}{bad}")).is_err(),
+            "{bad}"
+        );
     }
     assert!(factory::parse_sources("nope\n").is_err()); // header required
 }
@@ -51,15 +54,18 @@ fn parses_preset() {
 #[test]
 fn preset_round_trips() {
     let p = factory::parse_preset(PRESET).unwrap();
-    assert_eq!(factory::parse_preset(&factory::write_preset(&p)).unwrap(), p);
+    assert_eq!(
+        factory::parse_preset(&factory::write_preset(&p)).unwrap(),
+        p
+    );
 }
 
 #[test]
 fn rejects_bad_presets() {
     for bad in [
-        "name x\ncategory Pads\n",                         // no magic
-        "mangle-preset 2\nname x\ncategory Pads\n",        // unknown version
-        "mangle-preset 1\nname x\ncategory Nope\n",        // unknown category
+        "name x\ncategory Pads\n",                  // no magic
+        "mangle-preset 2\nname x\ncategory Pads\n", // unknown version
+        "mangle-preset 1\nname x\ncategory Nope\n", // unknown category
         "mangle-preset 1\nname x\ncategory Pads\nslot 6 0001\n",
         "mangle-preset 1\nname x\ncategory Pads\np zzzzzz 0.5\n",
         "mangle-preset 1\nname x\ncategory Pads\np 000001 NaN\n",
@@ -71,7 +77,9 @@ fn rejects_bad_presets() {
 
 #[test]
 fn out_of_range_values_are_clamped() {
-    let p = factory::parse_preset("mangle-preset 1\nname x\ncategory FX\np 000001 7\np 000002 -3\n").unwrap();
+    let p =
+        factory::parse_preset("mangle-preset 1\nname x\ncategory FX\np 000001 7\np 000002 -3\n")
+            .unwrap();
     assert_eq!(p.params, vec![(1, 1.0), (2, 0.0)]);
 }
 
