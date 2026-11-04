@@ -28,6 +28,7 @@ use std::sync::{Arc, RwLock};
 
 use mangle_dsp::curve::Curve;
 use mangle_dsp::engine::{MODE_NAMES, QUANT_NAMES};
+use mangle_dsp::factory::parse_factory_path;
 use mangle_dsp::filter::Svf;
 use mangle_dsp::matrix;
 use mangle_dsp::modengine::{
@@ -53,8 +54,11 @@ use mangle_dsp::state::{self, ExtraState};
 use mangle_dsp::voice::{Voice, VoiceManager};
 
 mod editor;
+mod factory_bank;
 pub mod feed;
 pub mod loading;
+
+pub use factory_bank::{bank, data_dir, reload_bank, FactoryBank};
 
 use feed::{EngineFeed, FeedFrame};
 
@@ -395,6 +399,10 @@ impl MangleParams {
         }
         for (i, r) in st.slot_refs.iter().enumerate() {
             let Some(r) = r else { continue };
+            // Factory samples stay symbolic even when sample embedding is enabled.
+            if parse_factory_path(&r.path).is_some() {
+                continue;
+            }
             let Some(bytes) = self.embed_bytes(i, r) else {
                 nih_log!(
                     "Mangle: slot {} not embedded: '{}' unreadable or changed",
@@ -981,14 +989,10 @@ impl Mangle {
         self.set_slot_status(i, loading::SlotStatus::Empty);
     }
 
-    /// Make the bank match `extra.slot_refs`: unchanged slots keep their
-    /// samples, unreferenced slots are cleared, changed ones are decoded here
-    /// (`cold`) or on a loader thread (hot reload while processing, so audio
-    /// is never stalled by file IO).
     /// The preset's embedded bytes for `slot`, when they match the ref's hash
-    /// and the referenced file is missing or has different content.
+    /// and the referenced non-factory file is missing or has different content.
     fn embedded_source(&self, slot: usize, r: &SlotRef, cold: bool) -> Option<loading::LoadSource> {
-        if r.content_hash == 0 {
+        if r.content_hash == 0 || parse_factory_path(&r.path).is_some() {
             return None;
         }
         let e = self.params.embedded.lock().ok()?[slot].clone()?;
@@ -1014,7 +1018,20 @@ impl Mangle {
         })
     }
 
+    /// Make the bank match `extra.slot_refs`: unchanged slots keep their
+    /// samples, unreferenced slots are cleared, changed ones are decoded here
+    /// (`cold`) or on a loader thread (hot reload while processing, so audio
+    /// is never stalled by file IO). Factory references always use the data folder.
     fn sync_slots_with_state(&mut self, cold: bool) {
+        self.sync_slots_with_factory_bank(cold, None);
+    }
+
+    /// Reconcile with an optional explicit factory snapshot instead of discovery.
+    fn sync_slots_with_factory_bank(
+        &mut self,
+        cold: bool,
+        factory_bank: Option<&Arc<FactoryBank>>,
+    ) {
         if let Ok(mut q) = self.params.pending_loads.lock() {
             q.retain(|p| !p.consumed);
         }
@@ -1031,8 +1048,9 @@ impl Mangle {
                 continue;
             };
             any_ref = true;
+            let factory_id = parse_factory_path(&r.path);
             if self.loaded[i].0 == r.path
-                && self.loaded[i].1 == r.content_hash
+                && (factory_id.is_some() || self.loaded[i].1 == r.content_hash)
                 && self.loaded_rate == self.sample_rate
             {
                 continue;
@@ -1040,7 +1058,15 @@ impl Mangle {
             self.clear_slot(i);
             let embedded = self.embedded_source(i, r, cold);
             let from_preset = cold && embedded.is_some();
-            let source = embedded
+            let source = factory_id
+                .map(|id| match factory_bank {
+                    Some(bank) => loading::LoadSource::FactoryFromBank {
+                        id,
+                        bank: bank.clone(),
+                    },
+                    None => loading::LoadSource::Factory(id),
+                })
+                .or(embedded)
                 .unwrap_or_else(|| loading::LoadSource::File(std::path::PathBuf::from(&r.path)));
             if !cold {
                 self.set_slot_status(i, loading::SlotStatus::Loading);
@@ -1049,7 +1075,10 @@ impl Mangle {
             }
             match loading::decode(&source, self.sample_rate) {
                 Ok(d) => {
-                    if r.content_hash != 0 && d.content_hash != r.content_hash {
+                    if factory_id.is_none()
+                        && r.content_hash != 0
+                        && d.content_hash != r.content_hash
+                    {
                         nih_log!(
                             "Mangle: slot {} content hash mismatch for '{}' (file changed?)",
                             i + 1,
@@ -2359,6 +2388,94 @@ mod tests {
         assert_eq!(ext, "wav");
         assert_eq!(mangle_loader::b64_decode(b64).unwrap(), bytes);
         assert!(!fields.contains_key("mangle_embed_1"));
+    }
+
+    #[test]
+    fn factory_refs_are_never_embedded_even_with_cached_bytes() {
+        let fixture = factory_bank::tests::Fixture::new();
+        let bytes = Arc::new(std::fs::read(fixture.bank().source_path(1).unwrap()).unwrap());
+        let hash = mangle_loader::hash_bytes(&bytes);
+        let m = test_plugin();
+        set_ref(&m, 0, std::path::Path::new("factory:0001"), hash);
+        m.params.extra.write().unwrap().embed_samples = true;
+        m.params.embed_cache.lock().unwrap()[0] =
+            Some(("factory:0001".into(), hash, bytes.clone()));
+        m.params.embedded.lock().unwrap()[0] = Some(EmbeddedSample {
+            ext: Some("wav".into()),
+            hash,
+            bytes,
+        });
+
+        let fields = m.params.serialize_fields();
+        assert!(!fields.contains_key("mangle_embed_0"));
+        let restored = MangleParams::new();
+        restored.deserialize_fields(&fields);
+        let state = restored.extra.read().unwrap();
+        assert!(state.embed_samples);
+        assert_eq!(state.slot_refs[0].as_ref().unwrap().path, "factory:0001");
+    }
+
+    #[test]
+    fn factory_state_restore_uses_current_data_for_cold_and_hot_loads() {
+        let fixture = factory_bank::tests::Fixture::new();
+        let bank = fixture.bank();
+        let old_file = fixture.0.join("old.wav");
+        write_test_wav(&old_file, 2400);
+        let old_bytes = std::fs::read(&old_file).unwrap();
+        let old_hash = mangle_loader::hash_bytes(&old_bytes);
+        let current_hash = mangle_loader::hash_file(&bank.source_path(1).unwrap()).unwrap();
+        assert_ne!(old_hash, current_hash);
+        let original = test_plugin();
+        set_ref(&original, 0, std::path::Path::new("factory:0001"), old_hash);
+        set_ref(&original, 1, std::path::Path::new("factory:0002"), old_hash);
+        let mut fields = original.params.serialize_fields();
+        // Even a preset containing obsolete factory bytes must use the data folder.
+        for slot in 0..2 {
+            fields.insert(
+                format!("mangle_embed_{slot}"),
+                format!("wav:{}", mangle_loader::b64_encode(&old_bytes)),
+            );
+        }
+
+        for cold in [true, false] {
+            let mut restored = Mangle::default();
+            restored.prepare(48_000.0);
+            restored.params.deserialize_fields(&fields);
+            restored.sync_slots_with_factory_bank(cold, Some(&bank));
+            if !cold {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while std::time::Instant::now() < deadline
+                    && (slot_status(&restored, 0) == loading::SlotStatus::Loading
+                        || slot_status(&restored, 1) == loading::SlotStatus::Loading)
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                restored.sync_gui_state();
+            }
+            assert_eq!(slot_status(&restored, 0), loading::SlotStatus::Loaded);
+            assert_eq!(restored.loaded[0], ("factory:0001".into(), current_hash));
+            assert_eq!(restored.bank.slots[0].as_ref().unwrap().len(), 32);
+            assert_eq!(
+                slot_status(&restored, 1),
+                loading::SlotStatus::Missing("factory:0002".into())
+            );
+            assert!(restored.bank.slots[1].is_none());
+            assert_eq!(
+                restored.params.extra.read().unwrap().slot_refs[1]
+                    .as_ref()
+                    .unwrap()
+                    .path,
+                "factory:0002"
+            );
+
+            // A stale saved hash does not force an unchanged factory slot to reload.
+            let sample = restored.bank.slots[0].as_ref().unwrap().data[0].as_ptr();
+            restored.sync_slots_with_factory_bank(true, Some(&bank));
+            assert_eq!(
+                restored.bank.slots[0].as_ref().unwrap().data[0].as_ptr(),
+                sample
+            );
+        }
     }
 
     #[test]

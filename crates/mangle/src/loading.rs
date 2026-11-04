@@ -7,15 +7,25 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use mangle_dsp::factory::{factory_path, parse_factory_path};
 use mangle_dsp::sample::SampleSlot;
 use mangle_dsp::state::SlotRef;
 
-use crate::{summarize, EmbeddedSample, MangleParams, PendingLoad, WaveSummary};
+use crate::{
+    factory_bank, summarize, EmbeddedSample, FactoryBank, MangleParams, PendingLoad, WaveSummary,
+};
 
 /// Where a sample comes from.
 #[derive(Clone, Debug)]
 pub enum LoadSource {
     File(PathBuf),
+    /// Symbolic source resolved through the process-wide bank when decoding.
+    Factory(u16),
+    /// Symbolic source from an explicitly loaded bank snapshot.
+    FactoryFromBank {
+        id: u16,
+        bank: Arc<FactoryBank>,
+    },
     /// Raw original-file bytes embedded in the preset (parameter map §7).
     Embedded {
         bytes: Arc<Vec<u8>>,
@@ -85,16 +95,26 @@ pub fn note(params: &MangleParams, msg: String) {
     push_message(params, msg);
 }
 
-/// Decode on the calling thread (file or embedded bytes) at `target_rate`.
+/// Decode on the calling thread (file, factory source or embedded bytes) at `target_rate`.
 /// A missing file maps to `SlotStatus::Missing(path)`, other errors to `Failed(msg)`.
 pub fn decode(source: &LoadSource, target_rate: f32) -> Result<Decoded, SlotStatus> {
     decode_resolved(&resolve(source).0, target_rate)
 }
 
-/// Settle a `FileOrEmbedded` source into a plain `File` or `Embedded` one by
-/// reading the file; the flag says the preset's embedded bytes were chosen.
-/// Reads and hashes the file: never call from the audio thread.
+/// Recognize symbolic factory paths before considering embedded bytes. Otherwise
+/// settle `FileOrEmbedded` by reading and hashing the file; the flag says the
+/// preset's embedded bytes were chosen. Never call from the audio thread.
 fn resolve(source: &LoadSource) -> (LoadSource, bool) {
+    let path = match source {
+        LoadSource::File(path) => path.to_str(),
+        LoadSource::Embedded { path, .. } | LoadSource::FileOrEmbedded { path, .. } => {
+            Some(path.as_str())
+        }
+        LoadSource::Factory(_) | LoadSource::FactoryFromBank { .. } => None,
+    };
+    if let Some(id) = path.and_then(parse_factory_path) {
+        return (LoadSource::Factory(id), false);
+    }
     let LoadSource::FileOrEmbedded {
         path,
         hash,
@@ -126,6 +146,13 @@ fn decode_resolved(source: &LoadSource, target_rate: f32) -> Result<Decoded, Slo
             mangle_loader::load_sample(p, target_rate),
             p.to_string_lossy().into_owned(),
         ),
+        LoadSource::Factory(id) => {
+            let bank = factory_bank::bank();
+            return decode_factory(*id, bank.as_deref(), target_rate);
+        }
+        LoadSource::FactoryFromBank { id, bank } => {
+            return decode_factory(*id, Some(bank), target_rate);
+        }
         LoadSource::Embedded { bytes, ext, path } => (
             mangle_loader::load_sample_from_bytes(bytes, ext.as_deref(), target_rate),
             path.clone(),
@@ -147,6 +174,25 @@ fn decode_resolved(source: &LoadSource, target_rate: f32) -> Result<Decoded, Slo
             Err(SlotStatus::Missing(path))
         }
         Err(e) => Err(SlotStatus::Failed(e.to_string())),
+    }
+}
+
+fn decode_factory(
+    id: u16,
+    bank: Option<&FactoryBank>,
+    target_rate: f32,
+) -> Result<Decoded, SlotStatus> {
+    let path = factory_path(id);
+    let file = bank
+        .and_then(|bank| bank.source_path(id))
+        .ok_or_else(|| SlotStatus::Missing(path.clone()))?;
+    match decode_resolved(&LoadSource::File(file), target_rate) {
+        Ok(mut decoded) => {
+            decoded.path = path;
+            Ok(decoded)
+        }
+        Err(SlotStatus::Missing(_)) => Err(SlotStatus::Missing(path)),
+        Err(status) => Err(status),
     }
 }
 
@@ -213,6 +259,9 @@ pub fn publish(params: &MangleParams, slot: usize, generation: u64, decoded: Dec
 fn source_name(source: &LoadSource) -> String {
     let path = match source {
         LoadSource::File(p) => p.to_string_lossy(),
+        LoadSource::Factory(id) | LoadSource::FactoryFromBank { id, .. } => {
+            std::borrow::Cow::Owned(factory_path(*id))
+        }
         LoadSource::Embedded { path, .. } | LoadSource::FileOrEmbedded { path, .. } => {
             std::borrow::Cow::Borrowed(path.as_str())
         }
@@ -374,6 +423,85 @@ mod tests {
             wav.to_string_lossy()
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn factory_worker_preserves_symbolic_path_and_reports_missing_id() {
+        let fixture = crate::factory_bank::tests::Fixture::new();
+        let bank = fixture.bank();
+        let params = Arc::new(MangleParams::new());
+        spawn_load(
+            params.clone(),
+            0,
+            LoadSource::FactoryFromBank {
+                id: 1,
+                bank: bank.clone(),
+            },
+        );
+        assert!(wait_for(|| status(&params, 0) == SlotStatus::Loaded));
+        let refs = params.extra.read().unwrap();
+        assert_eq!(refs.slot_refs[0].as_ref().unwrap().path, "factory:0001");
+        drop(refs);
+        let queue = params.pending_loads.lock().unwrap();
+        assert_eq!(queue[0].path, "factory:0001");
+        assert_eq!(queue[0].sample.len(), 32);
+        drop(queue);
+        spawn_load(
+            params.clone(),
+            1,
+            LoadSource::FactoryFromBank {
+                id: 2,
+                bank: bank.clone(),
+            },
+        );
+        assert!(wait_for(
+            || status(&params, 1) == SlotStatus::Missing("factory:0002".into())
+        ));
+        assert_eq!(queued(&params, 1), 0);
+        assert!(params.extra.read().unwrap().slot_refs[1].is_none());
+
+        std::fs::remove_dir_all(fixture.0.join("factory")).unwrap();
+        spawn_load(
+            params.clone(),
+            2,
+            LoadSource::FactoryFromBank { id: 3, bank },
+        );
+        assert!(wait_for(
+            || status(&params, 2) == SlotStatus::Missing("factory:0003".into())
+        ));
+        assert_eq!(queued(&params, 2), 0);
+    }
+
+    #[test]
+    fn absent_factory_bank_reports_symbolic_reference() {
+        assert!(
+            matches!(decode_factory(42, None, 48_000.0), Err(SlotStatus::Missing(path)) if path == "factory:0042")
+        );
+    }
+
+    #[test]
+    fn symbolic_paths_always_resolve_to_factory_sources() {
+        let bytes = Arc::new(vec![1, 2, 3]);
+        let sources = [
+            LoadSource::File(PathBuf::from("factory:0001")),
+            LoadSource::Embedded {
+                bytes: bytes.clone(),
+                ext: Some("wav".into()),
+                path: "factory:0001".into(),
+            },
+            LoadSource::FileOrEmbedded {
+                path: "factory:0001".into(),
+                hash: 123,
+                embedded: EmbeddedSample {
+                    bytes,
+                    hash: 123,
+                    ext: Some("wav".into()),
+                },
+            },
+        ];
+        for source in sources {
+            assert!(matches!(resolve(&source), (LoadSource::Factory(1), false)));
+        }
     }
 
     #[test]
