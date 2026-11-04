@@ -1171,14 +1171,20 @@ impl Mangle {
         // pointer moves only, no allocation or deallocation (the GUI thread
         // reclaims consumed entries and frees the old sample there). try_lock
         // keeps it RT-safe: if the GUI holds the lock we retry next block.
+        // An empty path is the GUI's request to empty the slot.
         if let Ok(mut pending) = self.params.pending_loads.try_lock() {
             for p in pending.iter_mut() {
                 if p.consumed {
                     continue;
                 }
                 let i = p.slot.min(5);
-                let new = std::mem::replace(p.sample.as_mut(), SampleSlot::empty());
-                if let Some(old) = self.bank.slots[i].replace(new) {
+                let old = if p.path.is_empty() {
+                    self.bank.slots[i].take()
+                } else {
+                    let new = std::mem::replace(p.sample.as_mut(), SampleSlot::empty());
+                    self.bank.slots[i].replace(new)
+                };
+                if let Some(old) = old {
                     *p.sample = old;
                 }
                 std::mem::swap(&mut self.loaded[i].0, &mut p.path);
@@ -2572,6 +2578,23 @@ mod tests {
         assert!(m.bank.slots[0].is_some());
         assert_eq!(m.loaded[0].0, b.to_string_lossy());
         assert_ne!(m.loaded[0].1, h);
+    }
+
+    #[test]
+    fn gui_clear_moves_sample_back_to_queue_for_reclamation() {
+        let mut m = test_plugin();
+        let original = m.bank.slots[0].as_ref().unwrap().data[0].as_ptr();
+        m.loaded[0] = ("old.wav".into(), 123);
+        loading::clear(&m.params, 0);
+        m.sync_gui_state();
+        assert!(m.bank.slots[0].is_none());
+        assert_eq!(m.loaded[0], (String::new(), 0));
+        let queue = m.params.pending_loads.lock().unwrap();
+        assert_eq!(queue.len(), 1);
+        assert!(queue[0].consumed);
+        assert_eq!(queue[0].sample.data[0].as_ptr(), original);
+        assert_eq!(queue[0].path, "old.wav");
+        assert_eq!(queue[0].content_hash, 123);
     }
 
     #[test]

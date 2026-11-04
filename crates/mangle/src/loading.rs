@@ -256,6 +256,31 @@ pub fn publish(params: &MangleParams, slot: usize, generation: u64, decoded: Dec
     true
 }
 
+/// Empty `slot` from the editor: cancel any load in flight, drop its waveform
+/// and queue an empty-path marker the audio thread turns into an empty slot.
+/// Leaves `extra.slot_refs` to the caller. Never call from the audio thread.
+pub fn clear(params: &MangleParams, slot: usize) {
+    params.loads.generation[slot].fetch_add(1, Ordering::AcqRel);
+    if let Ok(mut queue) = params.pending_loads.lock() {
+        queue.retain(|p| !p.consumed && p.slot != slot);
+        queue.push(PendingLoad {
+            slot,
+            sample: Box::new(SampleSlot::empty()),
+            path: String::new(),
+            content_hash: 0,
+            summary: WaveSummary {
+                peaks: Vec::new(),
+                len_samples: 0,
+            },
+            consumed: false,
+        });
+    }
+    if let Ok(mut w) = params.waveforms.write() {
+        w[slot] = None;
+    }
+    set_status(params, slot, SlotStatus::Empty);
+}
+
 fn source_name(source: &LoadSource) -> String {
     let path = match source {
         LoadSource::File(p) => p.to_string_lossy(),
@@ -530,6 +555,28 @@ mod tests {
         assert_eq!(queued(&params, 1), 0);
         assert!(publish(&params, 1, new, decoded(&wav)));
         assert_eq!(queued(&params, 1), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clear_cancels_in_flight_load_and_removes_waveform() {
+        let dir = tmp_dir("clear");
+        let wav = dir.join("a.wav");
+        write_wav(&wav, 1000);
+        let params = MangleParams::new();
+        let first = begin(&params, 2);
+        assert!(publish(&params, 2, first, decoded(&wav)));
+        let in_flight = begin(&params, 2);
+        clear(&params, 2);
+        assert!(!publish(&params, 2, in_flight, decoded(&wav)));
+        assert_eq!(status(&params, 2), SlotStatus::Empty);
+        assert!(params.waveforms.read().unwrap()[2].is_none());
+        let queue = params.pending_loads.lock().unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].slot, 2);
+        assert!(queue[0].path.is_empty());
+        assert!(queue[0].sample.is_empty());
+        assert!(!queue[0].consumed);
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -16,7 +16,12 @@
 //! * RND = randomize (right-click for Amount / Complexity / seed / pools)
 //! * waveform: drag loop edges, drag the region body to move it
 //! * body tabs: ENGINES (one engine at a time) / MOD / MATRIX / CURVES
-//!   (freehand draw + presets + ops); header + waveform stay put
+//!   (freehand draw + presets + ops) / BROWSER (factory presets: category
+//!   chips, search, PREV/NEXT); header + waveform stay put
+//! * SRC next to a slot's LOAD picks one of the factory sources for that slot
+//! * A / B in the header hold two patches (parameters + sample references);
+//!   clicking the dimmed one swaps them. UNDO RND and the A/B side are saved
+//!   with the project
 //!
 //! `API:` comments mark the egui / nih_plug_egui call sites most likely to
 //! need a touch-up against a given checkout (see BUILD_NOTES.md).
@@ -39,7 +44,9 @@ use mangle_dsp::random::{randomize, RandomOptions, RandomPools, SourcePool};
 
 use crate::feed::FeedFrame;
 use crate::loading::{self, LoadSource, SlotStatus};
-use crate::{MangleParams, PSlot};
+use crate::{FactoryBank, MangleParams, PSlot};
+use mangle_dsp::factory::{factory_path, parse_factory_path, CATEGORIES};
+use mangle_dsp::state::{ExtraState, SlotRef, Snapshot};
 
 // ------------------------------------------------------------ palette ---
 
@@ -501,6 +508,24 @@ enum Tab {
     Mod,
     Matrix,
     Curves,
+    Browser,
+}
+
+/// Slot change queued by a handler and carried out after the frame's extra
+/// state is written back, so a finishing load cannot race that write.
+enum SlotOp {
+    Load(LoadSource),
+    Clear,
+}
+
+/// BROWSER tab filters.
+#[derive(Default)]
+struct BrowserState {
+    /// Index into `CATEGORIES`; `None` = ALL.
+    category: Option<usize>,
+    search: String,
+    /// Bank warnings were already sent to the message log.
+    warned: bool,
 }
 
 // ------------------------------------------------- lanes display state ---
@@ -555,8 +580,15 @@ struct UiState {
     quant: usize,
     /// Preset-bank thumbnails, built once on first use.
     presets: Vec<Curve>,
-    /// Patch captured just before the last RND roll (UNDO RND / REROLL).
-    pre_roll: Option<Patch>,
+    browser: BrowserState,
+    /// Slot whose factory source picker is open, its anchor and its search text.
+    src_popup: Option<usize>,
+    src_button: Option<Rect>,
+    src_search: String,
+    slot_ops: Vec<(usize, SlotOp)>,
+    /// Test hook: use this bank instead of the process-wide one.
+    #[cfg(test)]
+    bank_override: Option<Option<Arc<FactoryBank>>>,
     /// UI time each momentary TRIG button stays lit until (Loop LFO 0..3,
     /// then LFO 0..6).
     trig_flash: [f64; 9],
@@ -710,13 +742,21 @@ fn draw_editor(
                         matrix_panel(ui, setter, params, st, &mut ex, &mut ex_changed);
                     }
                     Tab::Curves => curves_screen(ui, st, &mut ex, &mut ex_changed),
+                    Tab::Browser => browser_page(ui, setter, params, st, &mut ex, &mut ex_changed),
                 }
             });
         });
 
+    source_popup(ctx, st, &mut ex, &mut ex_changed);
+
     if ex_changed {
+        // Serialize cancellation with publishers before saving the new refs.
+        let _queue = params.pending_loads.lock().unwrap();
         match params.extra.write() {
             Ok(mut w) if params.extra_gen.load(Ordering::Acquire) == st.extra_gen => {
+                for (slot, _) in &st.slot_ops {
+                    params.loads.generation[*slot].fetch_add(1, Ordering::AcqRel);
+                }
                 w.curves = ex.curves.clone();
                 w.locks = ex.locks.clone();
                 w.random_amount = ex.random_amount;
@@ -725,14 +765,29 @@ fn draw_editor(
                 w.pools = ex.pools.clone();
                 w.slot_views = ex.slot_views;
                 w.embed_samples = ex.embed_samples;
+                w.slot_refs = ex.slot_refs.clone();
+                w.pre_roll = ex.pre_roll.clone();
+                w.ab = ex.ab.clone();
+                w.ab_active = ex.ab_active;
+                w.factory_preset = ex.factory_preset;
                 st.extra_gen = params.extra_gen.fetch_add(1, Ordering::Release) + 1;
                 st.extra = ex;
             }
             // Someone else wrote since we read: drop this edit and re-read.
-            _ => st.extra_gen = 0,
+            _ => {
+                st.extra_gen = 0;
+                st.slot_ops.clear();
+            }
         }
     } else {
         st.extra = ex;
+    }
+
+    for (slot, op) in std::mem::take(&mut st.slot_ops) {
+        match op {
+            SlotOp::Load(source) => loading::spawn_load(params.clone(), slot, source),
+            SlotOp::Clear => loading::clear(params, slot),
+        }
     }
 
     // ~30 Hz tick so the realtime displays animate without input events.
@@ -771,7 +826,7 @@ fn header_bar(
     egui::TopBottomPanel::top("hdr")
         .frame(egui::Frame::new().fill(HEADER).inner_margin(4.0))
         .show(ctx, |ui| {
-            // Horizontal scroll so RND/TOOLS/CURVES stay reachable when the
+            // Horizontal scroll so RND/A/B/TOOLS stay reachable when the
             // window is narrower than the header row.
             egui::ScrollArea::horizontal()
                 .id_salt("hdr-scroll")
@@ -810,9 +865,8 @@ fn header_bar(
                         let rnd = tbtn(ui, "\u{2684} RND", false, 64.0); // ⚄
                         if rnd.clicked() {
                             let seed = entropy_seed();
-                            roll_random(params, setter, st, ex, seed, None);
+                            roll_random(params, setter, ex, ex_changed, seed, None);
                             ex.last_seed = seed;
-                            *ex_changed = true;
                         }
                         rnd.context_menu(|ui| {
                             ui.set_min_width(220.0);
@@ -842,6 +896,15 @@ fn header_bar(
                             }
                         });
 
+                        ui.add_space(6.0);
+                        // A/B compare: the dimmed button swaps in the other patch.
+                        let a = tbtn(ui, "A", !ex.ab_active, 26.0);
+                        let b = tbtn(ui, "B", ex.ab_active, 26.0);
+                        if (a.clicked() && ex.ab_active) || (b.clicked() && !ex.ab_active) {
+                            ab_toggle(params, setter, st, ex, ex_changed);
+                        }
+                        ui.add_space(6.0);
+
                         ui.menu_button("TOOLS", |ui| {
                             if ui.button("INIT PATCH").clicked() {
                                 apply_patch(params, setter, &Patch::init(&params.table));
@@ -849,18 +912,24 @@ fn header_bar(
                                 *ex_changed = true;
                                 ui.close_menu();
                             }
-                            let can_undo = st.pre_roll.is_some();
+                            let can_undo = ex.pre_roll.is_some();
                             if ui
                                 .add_enabled(can_undo, egui::Button::new("UNDO RND"))
                                 .clicked()
                             {
-                                undo_roll(params, setter, st);
+                                undo_roll(params, setter, st, ex, ex_changed);
                                 ui.close_menu();
                             }
                             if ui.button("REROLL LAST SEED").clicked() {
                                 let seed = ex.last_seed;
-                                let base = st.pre_roll.clone();
-                                roll_random(params, setter, st, ex, seed, base);
+                                let base = ex
+                                    .pre_roll
+                                    .as_ref()
+                                    .filter(|s| s.values.len() == params.table.len())
+                                    .map(|s| Patch {
+                                        values: s.values.clone(),
+                                    });
+                                roll_random(params, setter, ex, ex_changed, seed, base);
                                 ui.close_menu();
                             }
                             ui.separator();
@@ -991,11 +1060,12 @@ fn lanes_display(ui: &mut Ui, params: &MangleParams, st: &mut UiState) {
 
 /// Body page selector, pinned at the bottom of the persistent strip.
 fn tab_bar(ui: &mut Ui, st: &mut UiState) {
-    const TABS: [(Tab, &str); 4] = [
+    const TABS: [(Tab, &str); 5] = [
         (Tab::Engines, "ENGINES"),
         (Tab::Mod, "MOD"),
         (Tab::Matrix, "MATRIX"),
         (Tab::Curves, "CURVES"),
+        (Tab::Browser, "BROWSER"),
     ];
     ui.horizontal(|ui| {
         for (tab, label) in TABS {
@@ -1093,14 +1163,16 @@ fn random_pool_menu(ui: &mut Ui, params: &MangleParams, pools: &mut RandomPools)
     changed
 }
 
-/// Randomize from `base` (the current patch when `None`), remembering `base`
-/// so the roll can be undone or reproduced. Held notes keep sounding and
-/// morph into the new patch.
+/// Randomize from `base` (the current patch when `None`). A roll from the
+/// current patch stores it with the sample references in `ex.pre_roll`, so it
+/// can be undone (also after the project is saved and reopened); a reroll
+/// from `base` keeps the stored one. Held notes keep sounding and morph into
+/// the new patch.
 fn roll_random(
     params: &MangleParams,
     setter: &ParamSetter,
-    st: &mut UiState,
-    ex: &mangle_dsp::state::ExtraState,
+    ex: &mut ExtraState,
+    ex_changed: &mut bool,
     seed: u64,
     base: Option<Patch>,
 ) {
@@ -1110,17 +1182,459 @@ fn roll_random(
         ex.locks.clone(),
         &ex.pools,
     );
-    let base = base.unwrap_or_else(|| read_patch(params));
-    let mut patch = base.clone();
-    st.pre_roll = Some(base);
+    let mut patch = match base {
+        Some(base) => base,
+        None => {
+            let current = read_patch(params);
+            ex.pre_roll = Some(Snapshot {
+                values: current.values.clone(),
+                slot_refs: ex.slot_refs.clone(),
+            });
+            current
+        }
+    };
     randomize(&mut patch, &params.table, &opts, seed);
     apply_patch(params, setter, &patch);
+    *ex_changed = true;
 }
 
-/// Restore the patch captured before the last roll.
-fn undo_roll(params: &MangleParams, setter: &ParamSetter, st: &mut UiState) {
-    if let Some(patch) = st.pre_roll.take() {
-        apply_patch(params, setter, &patch);
+/// Restore the patch and samples captured before the last roll.
+fn undo_roll(
+    params: &MangleParams,
+    setter: &ParamSetter,
+    st: &mut UiState,
+    ex: &mut ExtraState,
+    ex_changed: &mut bool,
+) {
+    if let Some(snap) = ex.pre_roll.take() {
+        apply_snapshot(params, setter, st, ex, &snap);
+        *ex_changed = true;
+    }
+}
+
+// ------------------------------------------- snapshots, A/B and factory ---
+
+/// The process-wide factory bank, or the test override.
+fn bank_for(st: &UiState) -> Option<Arc<FactoryBank>> {
+    #[cfg(test)]
+    if let Some(bank) = &st.bank_override {
+        return bank.clone();
+    }
+    let _ = st;
+    crate::factory_bank::bank()
+}
+
+/// Current parameter values and sample references.
+fn snapshot(params: &MangleParams, ex: &ExtraState) -> Snapshot {
+    Snapshot {
+        values: read_patch(params).values,
+        slot_refs: ex.slot_refs.clone(),
+    }
+}
+
+/// Write a snapshot's values through the host and bring the slots in line
+/// with its references. A snapshot that does not fit the parameter table is
+/// ignored (returns false).
+fn apply_snapshot(
+    params: &MangleParams,
+    setter: &ParamSetter,
+    st: &mut UiState,
+    ex: &mut ExtraState,
+    snap: &Snapshot,
+) -> bool {
+    if snap.values.len() != params.table.len() {
+        return false;
+    }
+    apply_patch(
+        params,
+        setter,
+        &Patch {
+            values: snap.values.clone(),
+        },
+    );
+    let bank = bank_for(st);
+    set_slots(st, ex, bank.as_ref(), &snap.slot_refs, false);
+    true
+}
+
+/// The A/B swap on the stored state: the other side moves to the live state
+/// and `live` is kept in its place. Returns the snapshot to apply, or `None`
+/// when there was no usable other side (the first click only copies `live`).
+fn ab_swap(live: Snapshot, ex: &mut ExtraState, n_params: usize) -> Option<Snapshot> {
+    let other = ex.ab.replace(live).filter(|s| s.values.len() == n_params);
+    ex.ab_active = !ex.ab_active;
+    other
+}
+
+fn ab_toggle(
+    params: &MangleParams,
+    setter: &ParamSetter,
+    st: &mut UiState,
+    ex: &mut ExtraState,
+    ex_changed: &mut bool,
+) {
+    let live = snapshot(params, ex);
+    if let Some(other) = ab_swap(live, ex, params.table.len()) {
+        apply_snapshot(params, setter, st, ex, &other);
+    }
+    *ex_changed = true;
+}
+
+fn same_slot_ref(a: &SlotRef, b: &SlotRef) -> bool {
+    match (parse_factory_path(&a.path), parse_factory_path(&b.path)) {
+        (Some(x), Some(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+fn slot_source(bank: Option<&Arc<FactoryBank>>, r: &SlotRef) -> LoadSource {
+    match (parse_factory_path(&r.path), bank) {
+        (Some(id), Some(bank)) => LoadSource::FactoryFromBank {
+            id,
+            bank: bank.clone(),
+        },
+        (Some(id), None) => LoadSource::Factory(id),
+        (None, _) => LoadSource::File(std::path::PathBuf::from(&r.path)),
+    }
+}
+
+/// Point `slot` at `target`: record the reference and queue the load, or
+/// queue a clear. Unless `force`, a slot already holding the same reference
+/// is left alone, and an empty slot is not cleared again.
+fn set_slot(
+    st: &mut UiState,
+    ex: &mut ExtraState,
+    bank: Option<&Arc<FactoryBank>>,
+    slot: usize,
+    target: &Option<SlotRef>,
+    force: bool,
+) {
+    match target {
+        Some(r) => {
+            if !force
+                && ex.slot_refs[slot]
+                    .as_ref()
+                    .is_some_and(|c| same_slot_ref(c, r))
+            {
+                return;
+            }
+            ex.slot_refs[slot] = Some(r.clone());
+            st.slot_ops.push((slot, SlotOp::Load(slot_source(bank, r))));
+        }
+        None => {
+            if !force && ex.slot_refs[slot].is_none() && st.slot_status[slot] != SlotStatus::Loading
+            {
+                return;
+            }
+            ex.slot_refs[slot] = None;
+            st.slot_ops.push((slot, SlotOp::Clear));
+        }
+    }
+}
+
+fn set_slots(
+    st: &mut UiState,
+    ex: &mut ExtraState,
+    bank: Option<&Arc<FactoryBank>>,
+    target: &[Option<SlotRef>; 6],
+    force: bool,
+) {
+    for (slot, t) in target.iter().enumerate() {
+        set_slot(st, ex, bank, slot, t, force);
+    }
+}
+
+fn factory_ref(id: u16) -> SlotRef {
+    SlotRef {
+        path: factory_path(id),
+        content_hash: 0,
+    }
+}
+
+/// Preset id: the leading decimal digits of its file name.
+fn preset_id(file_name: &str) -> Option<u16> {
+    let end = file_name
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(file_name.len());
+    file_name[..end].parse().ok()
+}
+
+/// Indices into `bank.presets` that match the category chip and the
+/// case-insensitive name search.
+fn browser_list(bank: &FactoryBank, category: Option<usize>, search: &str) -> Vec<usize> {
+    let needle = search.trim().to_lowercase();
+    bank.presets
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, p))| category.is_none_or(|c| p.category as usize == c))
+        .filter(|(_, (_, p))| p.name.to_lowercase().contains(&needle))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// The list entry after (or before) the current preset, wrapping around. With
+/// no current preset in the list, forward starts at the top and back at the
+/// bottom.
+fn browser_step(
+    bank: &FactoryBank,
+    list: &[usize],
+    current: Option<u16>,
+    forward: bool,
+) -> Option<usize> {
+    let n = list.len();
+    if n == 0 {
+        return None;
+    }
+    let at = current.and_then(|id| {
+        list.iter()
+            .position(|&i| preset_id(&bank.presets[i].0) == Some(id))
+    });
+    let next = match (at, forward) {
+        (Some(p), true) => (p + 1) % n,
+        (Some(p), false) => (p + n - 1) % n,
+        (None, true) => 0,
+        (None, false) => n - 1,
+    };
+    Some(list[next])
+}
+
+/// Load factory preset `index`: init defaults plus the preset's parameters
+/// (unknown ids ignored) and its slot sources. Curves, locks, pools, random
+/// settings and the embed flag stay as they are.
+fn load_preset(
+    params: &MangleParams,
+    setter: &ParamSetter,
+    st: &mut UiState,
+    ex: &mut ExtraState,
+    ex_changed: &mut bool,
+    bank: &Arc<FactoryBank>,
+    index: usize,
+) {
+    let Some((file, preset)) = bank.presets.get(index) else {
+        return;
+    };
+    let mut patch = Patch::init(&params.table);
+    for &(id, v) in &preset.params {
+        if let Some(pos) = params.table.try_pos(id) {
+            patch.values[pos] = v;
+        }
+    }
+    apply_patch(params, setter, &patch);
+    let target = preset.slots.map(|s| s.map(factory_ref));
+    set_slots(st, ex, Some(bank), &target, true);
+    ex.factory_preset = preset_id(file);
+    *ex_changed = true;
+    loading::note(params, format!("loaded {}", preset.name));
+}
+
+/// One selectable list line: name left, tag right.
+fn list_row(ui: &mut Ui, name: &str, tag: &str, active: bool) -> egui::Response {
+    let w = ui.available_width().max(240.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, CELL_H + 2.0), Sense::click());
+    if active {
+        fill(ui, rect, ACCENT_FAINT);
+        frame(ui, rect, ACCENT);
+    } else if resp.hovered() {
+        fill(ui, rect, HEADER);
+    }
+    let col = if active { BRIGHT } else { TEXT };
+    txt(
+        ui,
+        Pos2::new(rect.left() + 6.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        name,
+        10.0,
+        col,
+    );
+    txt(
+        ui,
+        Pos2::new(rect.right() - 6.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        tag,
+        9.0,
+        DIM,
+    );
+    resp
+}
+
+fn text_line(ui: &mut Ui, s: &str, col: Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), CELL_H), Sense::hover());
+    txt(
+        ui,
+        Pos2::new(rect.left() + 4.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        s,
+        10.0,
+        col,
+    );
+}
+
+fn search_box(ui: &mut Ui, text: &mut String) {
+    ui.add(
+        egui::TextEdit::singleline(text)
+            .hint_text("search")
+            .desired_width(220.0),
+    );
+}
+
+/// BROWSER tab: factory presets.
+fn browser_page(
+    ui: &mut Ui,
+    setter: &ParamSetter,
+    params: &MangleParams,
+    st: &mut UiState,
+    ex: &mut ExtraState,
+    ex_changed: &mut bool,
+) {
+    let Some(bank) = bank_for(st) else {
+        text_line(ui, "No factory data found", BRIGHT);
+        text_line(ui, "Looked in, in order:", DIM);
+        text_line(ui, "1. $MANGLE_DATA, if it contains factory/", DIM);
+        text_line(
+            ui,
+            "2. $XDG_DATA_HOME/mangle (default ~/.local/share/mangle)",
+            DIM,
+        );
+        text_line(ui, "3. mangle/ next to the plugin binary", DIM);
+        return;
+    };
+    if !st.browser.warned {
+        st.browser.warned = true;
+        for w in &bank.warnings {
+            loading::note(params, w.clone());
+        }
+    }
+
+    ui.horizontal_wrapped(|ui| {
+        if tbtn(ui, "ALL", st.browser.category.is_none(), 48.0).clicked() {
+            st.browser.category = None;
+        }
+        for (i, name) in CATEGORIES.iter().enumerate() {
+            if tbtn(ui, name, st.browser.category == Some(i), 74.0).clicked() {
+                st.browser.category = Some(i);
+            }
+        }
+    });
+    ui.add_space(GAP * 2.0);
+
+    let (mut prev, mut next) = (false, false);
+    ui.horizontal(|ui| {
+        search_box(ui, &mut st.browser.search);
+        ui.add_space(8.0);
+        prev = tbtn(ui, "PREV", false, 56.0).clicked();
+        next = tbtn(ui, "NEXT", false, 56.0).clicked();
+    });
+    ui.add_space(GAP * 2.0);
+
+    let list = browser_list(&bank, st.browser.category, &st.browser.search);
+    let mut pick = None;
+    if prev || next {
+        pick = browser_step(&bank, &list, ex.factory_preset, next);
+    }
+    egui::ScrollArea::vertical()
+        .id_salt("browser-list")
+        .max_height(260.0)
+        .show(ui, |ui| {
+            for &i in &list {
+                let (file, preset) = &bank.presets[i];
+                let id = preset_id(file);
+                let tag = CATEGORIES[(preset.category as usize).min(CATEGORIES.len() - 1)];
+                let active = id.is_some() && id == ex.factory_preset;
+                if list_row(ui, &preset.name, tag, active).clicked() {
+                    pick = Some(i);
+                }
+            }
+        });
+    if list.is_empty() {
+        text_line(ui, "no presets match", DIM);
+    }
+    if let Some(i) = pick {
+        load_preset(params, setter, st, ex, ex_changed, &bank, i);
+    }
+    ui.add_space(GAP * 2.0);
+    text_line(
+        ui,
+        &format!(
+            "{} of {} presets \u{b7} {} sources",
+            list.len(),
+            bank.presets.len(),
+            bank.sources.len()
+        ),
+        DIM,
+    );
+}
+
+/// Factory source picker for the slot in `st.src_popup`: sources grouped by
+/// category under a search box. Closes on a pick, Esc or a click elsewhere.
+fn source_popup(ctx: &egui::Context, st: &mut UiState, ex: &mut ExtraState, ex_changed: &mut bool) {
+    let (Some(slot), Some(button)) = (st.src_popup, st.src_button) else {
+        return;
+    };
+    let bank = bank_for(st);
+    let current = ex.slot_refs[slot]
+        .as_ref()
+        .and_then(|r| parse_factory_path(&r.path));
+    let mut chosen = None;
+    let area = egui::Area::new(egui::Id::new("src-popup"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(button.left_bottom())
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(260.0);
+                let Some(bank) = &bank else {
+                    ui.label("No factory data found");
+                    return;
+                };
+                search_box(ui, &mut st.src_search);
+                let needle = st.src_search.trim().to_lowercase();
+                let mut cats: Vec<&str> = CATEGORIES.to_vec();
+                for s in &bank.sources {
+                    if !cats.contains(&s.category.as_str()) {
+                        cats.push(&s.category);
+                    }
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("src-list")
+                    .max_height(300.0)
+                    .show(ui, |ui| {
+                        for cat in cats {
+                            let items: Vec<_> = bank
+                                .sources
+                                .iter()
+                                .filter(|s| s.category == cat)
+                                .filter(|s| s.name.to_lowercase().contains(&needle))
+                                .collect();
+                            if items.is_empty() {
+                                continue;
+                            }
+                            section_label(ui, cat);
+                            for s in items {
+                                let tag = format!("{:04}", s.id);
+                                if list_row(ui, &s.name, &tag, current == Some(s.id)).clicked() {
+                                    chosen = Some(s.id);
+                                }
+                            }
+                        }
+                    });
+            });
+        });
+    let (clicked_at, esc) = ctx.input(|i| {
+        (
+            i.pointer
+                .any_click()
+                .then(|| i.pointer.interact_pos())
+                .flatten(),
+            i.key_pressed(egui::Key::Escape),
+        )
+    });
+    let outside =
+        clicked_at.is_some_and(|p| !area.response.rect.contains(p) && !button.contains(p));
+    if let Some(id) = chosen {
+        set_slot(st, ex, bank.as_ref(), slot, &Some(factory_ref(id)), true);
+        *ex_changed = true;
+    }
+    if chosen.is_some() || outside || esc {
+        st.src_popup = None;
     }
 }
 
@@ -1162,6 +1676,34 @@ fn status_line(state: &SlotStatus, message: &str) -> String {
         SlotStatus::Missing(p) => format!("missing: {p} \u{2014} LOAD to relink"),
         SlotStatus::Failed(m) => format!("failed: {m}"),
         _ => message.to_string(),
+    }
+}
+
+/// Status text for slot `sel`, including the name of a factory source.
+fn slot_line(st: &UiState, ex: &ExtraState, sel: usize) -> String {
+    let factory = ex.slot_refs[sel]
+        .as_ref()
+        .and_then(|r| parse_factory_path(&r.path));
+    match (factory, &st.slot_status[sel]) {
+        (Some(id), status) => {
+            let name = bank_for(st)
+                .and_then(|b| {
+                    b.sources
+                        .iter()
+                        .find(|s| s.id == id)
+                        .map(|s| s.name.clone())
+                })
+                .unwrap_or_else(|| factory_path(id));
+            if matches!(status, SlotStatus::Empty | SlotStatus::Loaded) {
+                format!("factory: {name}")
+            } else {
+                format!(
+                    "factory: {name} · {}",
+                    status_line(status, &st.last_message)
+                )
+            }
+        }
+        _ => status_line(&st.slot_status[sel], &st.last_message),
     }
 }
 
@@ -1232,7 +1774,7 @@ fn waveform_strip(
             ui,
             rect.center(),
             Align2::CENTER_CENTER,
-            "EMPTY \u{2014} click LOAD to choose a sample (wav/flac/aiff/ogg/mp3)",
+            "EMPTY \u{2014} LOAD a sample file or SRC a factory source",
             10.0,
             DIM,
         );
@@ -1313,10 +1855,8 @@ fn waveform_strip(
     // centre (vertical: up grows, down shrinks). Shift-drag / Shift-wheel
     // zooms the view, double-click resets it.
     let norm_at = |p: Pos2| (v0 + (p.x - rect.left()) / rect.width() * span).clamp(0.0, 1.0);
-    let len = params
-        .waveforms
-        .read()
-        .ok()
+    let len = waves
+        .as_ref()
         .and_then(|ws| ws[sel].as_ref().map(|w| w.len_samples))
         .unwrap_or(0);
     let sr = f32::from_bits(params.sr_bits.load(std::sync::atomic::Ordering::Acquire));
@@ -1414,12 +1954,7 @@ fn waveform_strip(
         let files_hover = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
         let mut hovered_tab: Option<usize> = None;
         for i in 0..6usize {
-            let loaded = params
-                .waveforms
-                .read()
-                .ok()
-                .map(|w| w[i].is_some())
-                .unwrap_or(false);
+            let loaded = waves.as_ref().is_some_and(|w| w[i].is_some());
             let state = &st.slot_status[i];
             let flag = matches!(state, SlotStatus::Missing(_) | SlotStatus::Failed(_));
             let label = if *state == SlotStatus::Loading {
@@ -1464,6 +1999,12 @@ fn waveform_strip(
         if tbtn(ui, load_label, busy, 56.0).clicked() && !busy {
             open_file_dialog(params, sel);
         }
+        let src = tbtn(ui, "SRC", st.src_popup == Some(sel), 40.0)
+            .on_hover_text("Pick a factory source for this slot");
+        if src.clicked() {
+            st.src_popup = (st.src_popup != Some(sel)).then_some(sel);
+            st.src_button = Some(src.rect);
+        }
         ui.add_space(8.0);
         cell(
             ui,
@@ -1496,7 +2037,7 @@ fn waveform_strip(
         let line = if st.learn.is_some() {
             "touch a control\u{2026}".to_string()
         } else {
-            status_line(&st.slot_status[sel], &st.last_message)
+            slot_line(st, ex, sel)
         };
         if !line.is_empty() {
             ui.add_space(10.0);
@@ -2497,7 +3038,13 @@ mod gui_tests {
         }
 
         // Every tab, and each engine page, with a click/scroll sweep on each.
-        for tab in [Tab::Engines, Tab::Mod, Tab::Matrix, Tab::Curves] {
+        for tab in [
+            Tab::Engines,
+            Tab::Mod,
+            Tab::Matrix,
+            Tab::Curves,
+            Tab::Browser,
+        ] {
             st.tab = tab;
             for eng in 0..3usize {
                 st.engine_page = eng;
@@ -2926,10 +3473,15 @@ mod gui_tests {
         let setter = ParamSetter::new(&host);
         let mut st = UiState::default();
         let before = read_patch(&params);
-        let ex = params.extra.read().unwrap().clone();
-        roll_random(&params, &setter, &mut st, &ex, 7, None);
+        let mut ex = params.extra.read().unwrap().clone();
+        let mut changed = false;
+        roll_random(&params, &setter, &mut ex, &mut changed, 7, None);
         assert!(!params.panic.load(Ordering::Acquire));
-        assert_eq!(st.pre_roll.as_ref(), Some(&before));
+        assert_eq!(
+            ex.pre_roll.as_ref().map(|s| &s.values),
+            Some(&before.values)
+        );
+        assert!(changed);
         assert!(host.sets.load(Ordering::Relaxed) > 0);
 
         // The harness does not apply sets, so stage a distinct pre-roll and
@@ -2937,10 +3489,13 @@ mod gui_tests {
         let pos = params.slots.len() / 2;
         let mut staged = before.clone();
         staged.values[pos] = if before.values[pos] > 0.5 { 0.0 } else { 1.0 };
-        st.pre_roll = Some(staged.clone());
+        ex.pre_roll = Some(Snapshot {
+            values: staged.values.clone(),
+            slot_refs: ex.slot_refs.clone(),
+        });
         host.set_log.lock().unwrap().clear();
-        undo_roll(&params, &setter, &mut st);
-        assert!(st.pre_roll.is_none());
+        undo_roll(&params, &setter, &mut st, &mut ex, &mut changed);
+        assert!(ex.pre_roll.is_none());
         let log = host.set_log.lock().unwrap();
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].1, staged.values[pos]);
@@ -3227,6 +3782,367 @@ mod gui_tests {
         right_click(&mut ev, find(&labels, text));
         labels_frame(ctx, setter, params, st, time, ev);
         labels_frame(ctx, setter, params, st, time, vec![]);
+    }
+
+    struct BrowserGui {
+        params: Arc<MangleParams>,
+        host: TestHost,
+        ctx: Context,
+        st: UiState,
+        time: f64,
+    }
+
+    impl BrowserGui {
+        fn new(bank: Option<Arc<FactoryBank>>) -> Self {
+            let mut gui = Self {
+                params: Arc::new(MangleParams::new()),
+                host: TestHost::default(),
+                ctx: Context::default(),
+                st: UiState {
+                    bank_override: Some(bank),
+                    ..Default::default()
+                },
+                time: 0.0,
+            };
+            gui.frame(vec![]);
+            gui.frame(vec![]);
+            gui
+        }
+
+        fn frame(&mut self, events: Vec<Event>) -> Vec<(String, Pos2)> {
+            labels_frame(
+                &self.ctx,
+                &ParamSetter::new(&self.host),
+                &self.params,
+                &mut self.st,
+                &mut self.time,
+                events,
+            )
+        }
+
+        fn click(&mut self, text: &str) {
+            click_label(
+                &self.ctx,
+                &ParamSetter::new(&self.host),
+                &self.params,
+                &mut self.st,
+                &mut self.time,
+                text,
+            );
+        }
+
+        fn search(&mut self, text: &str) {
+            self.click("search");
+            self.frame(vec![Event::Text(text.into())]);
+        }
+
+        fn extra(&self) -> ExtraState {
+            self.params.extra.read().unwrap().clone()
+        }
+
+        fn set_extra(&mut self, extra: ExtraState) {
+            *self.params.extra.write().unwrap() = extra;
+            self.params.extra_gen.fetch_add(1, Ordering::Release);
+        }
+
+        // Model a host update between frames. The recording host deliberately
+        // does not apply parameter writes itself.
+        fn set_level(&mut self, value: f32) {
+            let params = Arc::get_mut(&mut self.params).expect("load workers finished");
+            let PSlot::F(i) = params.slots[params.table.pos(pid(Module::Global, 0, 4))] else {
+                panic!("level is continuous");
+            };
+            params.floats[i] =
+                FloatParam::new("Level", value, FloatRange::Linear { min: 0.0, max: 1.0 });
+        }
+
+        fn level_write(&self) -> Option<f32> {
+            let params = &self.params;
+            let PSlot::F(i) = params.slots[params.table.pos(pid(Module::Global, 0, 4))] else {
+                panic!("level is continuous");
+            };
+            self.host
+                .set_log
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|(p, _)| *p == params.floats[i].as_ptr())
+                .map(|(_, v)| *v)
+        }
+
+        fn settle_loads(&mut self) {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while Arc::strong_count(&self.params) != 1 && std::time::Instant::now() < until {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            assert_eq!(Arc::strong_count(&self.params), 1, "load worker timed out");
+            self.frame(vec![]);
+        }
+    }
+
+    #[test]
+    fn browser_click_loads_defaults_params_refs_and_preserves_extra() {
+        let fixture = crate::factory_bank::tests::Fixture::new();
+        std::fs::write(
+            fixture.0.join("factory/presets/010-one.mpreset"),
+            format!(
+            "mangle-preset 1\nname One\ncategory Pads\nslot 0 0001\np {:06x} 0.25\np ffffff 0.8\n",
+            pid(Module::Global, 0, 4),
+        ),
+        )
+        .unwrap();
+        let bank = fixture.bank();
+        let warnings = bank.warnings.clone();
+        let mut gui = BrowserGui::new(Some(bank));
+        gui.set_level(0.75);
+        let (reset_pos, reset_index) = gui
+            .params
+            .slots
+            .iter()
+            .enumerate()
+            .find_map(|(pos, slot)| match slot {
+                PSlot::F(i) if pos != gui.params.table.pos(pid(Module::Global, 0, 4)) => {
+                    Some((pos, *i))
+                }
+                _ => None,
+            })
+            .unwrap();
+        Arc::get_mut(&mut gui.params).unwrap().floats[reset_index] =
+            FloatParam::new("Unlisted", 0.73, FloatRange::Linear { min: 0.0, max: 1.0 });
+        let mut ex = gui.extra();
+        ex.slot_refs[2] = Some(factory_ref(3));
+        ex.curves[1] = Curve::preset(5);
+        ex.locks.grain[0] = true;
+        ex.random_amount = 0.27;
+        ex.random_complexity = 0.83;
+        ex.last_seed = 17;
+        ex.embed_samples = true;
+        let before = ex.clone();
+        gui.set_extra(ex);
+        gui.click("BROWSER");
+        gui.click("One");
+        gui.settle_loads();
+        assert_eq!(gui.level_write(), Some(0.25));
+        assert!(gui.host.set_log.lock().unwrap().contains(&(
+            gui.params.floats[reset_index].as_ptr(),
+            Patch::init(&gui.params.table).values[reset_pos],
+        )));
+        let ex = gui.extra();
+        assert_eq!(ex.factory_preset, Some(10));
+        assert_eq!(ex.slot_refs[0].as_ref().unwrap().path, "factory:0001");
+        assert!(ex.slot_refs[1..].iter().all(Option::is_none));
+        assert_eq!(
+            gui.params.loads.status.lock().unwrap()[2],
+            SlotStatus::Empty
+        );
+        assert!(gui
+            .params
+            .pending_loads
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.slot == 2 && p.path.is_empty() && p.sample.is_empty()));
+        // Even a slot without a saved ref can hold the built-in fallback tone.
+        assert!(gui
+            .params
+            .pending_loads
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.slot == 5 && p.path.is_empty()));
+        for (a, b) in ex.curves.iter().zip(&before.curves) {
+            assert_eq!(a.0, b.0);
+        }
+        assert_eq!(ex.locks, before.locks);
+        assert_eq!(ex.pools, before.pools);
+        assert_eq!(ex.random_amount, before.random_amount);
+        assert_eq!(ex.random_complexity, before.random_complexity);
+        assert_eq!(ex.last_seed, before.last_seed);
+        assert_eq!(ex.embed_samples, before.embed_samples);
+        gui.frame(vec![]);
+        let messages = gui.params.loads.messages.lock().unwrap();
+        assert!(messages.iter().any(|m| m == "loaded One"));
+        for warning in warnings {
+            assert_eq!(messages.iter().filter(|m| **m == warning).count(), 1);
+        }
+    }
+
+    #[test]
+    fn browser_filters_searches_and_wraps_with_empty_single_and_many_lists() {
+        let fixture = crate::factory_bank::tests::Fixture::new();
+        for (id, name, cat) in [(30, "One More", "Pads"), (40, "Other", "Pads")] {
+            std::fs::write(
+                fixture
+                    .0
+                    .join(format!("factory/presets/{id:03}-extra.mpreset")),
+                format!("mangle-preset 1\nname {name}\ncategory {cat}\n"),
+            )
+            .unwrap();
+        }
+        let mut gui = BrowserGui::new(Some(fixture.bank()));
+        gui.click("BROWSER");
+        gui.click("Pads");
+        assert_eq!(gui.st.browser.category, Some(0));
+        gui.search("oNe");
+        assert_eq!(gui.st.browser.search, "oNe");
+        let labels = gui.frame(vec![]);
+        assert!(labels
+            .iter()
+            .any(|(s, _)| s == "2 of 4 presets · 2 sources"));
+        assert!(!labels.iter().any(|(s, _)| s == "Three" || s == "Other"));
+        for (button, id) in [("NEXT", 10), ("NEXT", 30), ("NEXT", 10), ("PREV", 30)] {
+            gui.click(button);
+            gui.settle_loads();
+            assert_eq!(gui.extra().factory_preset, Some(id));
+        }
+        // A category with no matches leaves the selection unchanged.
+        gui.click("FX");
+        gui.click("NEXT");
+        assert_eq!(gui.extra().factory_preset, Some(30));
+        assert!(gui
+            .frame(vec![])
+            .iter()
+            .any(|(s, _)| s == "no presets match"));
+
+        for count in [0, 1] {
+            let mut bank = FactoryBank::load(&fixture.0).unwrap();
+            bank.presets.truncate(count);
+            let mut gui = BrowserGui::new(Some(Arc::new(bank)));
+            gui.click("BROWSER");
+            for button in ["PREV", "NEXT", "NEXT"] {
+                gui.click(button);
+                gui.settle_loads();
+                assert_eq!(gui.extra().factory_preset, (count == 1).then_some(10));
+            }
+        }
+        let mut gui = BrowserGui::new(None);
+        gui.click("BROWSER");
+        let labels = gui.frame(vec![]);
+        for text in [
+            "No factory data found",
+            "1. $MANGLE_DATA, if it contains factory/",
+            "2. $XDG_DATA_HOME/mangle (default ~/.local/share/mangle)",
+            "3. mangle/ next to the plugin binary",
+        ] {
+            find(&labels, text);
+        }
+    }
+
+    #[test]
+    fn source_picker_searches_and_loads_selected_slot() {
+        let fixture = crate::factory_bank::tests::Fixture::new();
+        let mut gui = BrowserGui::new(Some(fixture.bank()));
+        gui.click(" 3 ");
+        assert_eq!(gui.st.selected_slot, 2);
+        gui.click("SRC");
+        assert_eq!(gui.st.src_popup, Some(2));
+        let labels = gui.frame(vec![]);
+        find(&labels, "Pads");
+        find(&labels, "FX");
+        gui.search("tHrEe");
+        let labels = gui.frame(vec![]);
+        find(&labels, "Three");
+        assert!(!labels.iter().any(|(s, _)| s == "One"));
+        gui.click("Three");
+        gui.settle_loads();
+        assert!(gui.st.src_popup.is_none());
+        assert_eq!(
+            gui.extra().slot_refs[2].as_ref().unwrap().path,
+            "factory:0003"
+        );
+        assert!(gui.extra().slot_refs[0].is_none());
+        assert_eq!(
+            gui.params.loads.status.lock().unwrap()[2],
+            SlotStatus::Loaded
+        );
+        find(&gui.frame(vec![]), "factory: Three");
+    }
+
+    #[test]
+    fn ab_clicks_copy_flip_restore_and_round_trip_without_reloading_unchanged_slots() {
+        let fixture = crate::factory_bank::tests::Fixture::new();
+        let mut gui = BrowserGui::new(Some(fixture.bank()));
+        gui.set_level(0.2);
+        let mut ex = gui.extra();
+        ex.slot_refs[0] = Some(factory_ref(1));
+        gui.set_extra(ex);
+        let first = snapshot(&gui.params, &gui.extra());
+        gui.click("B");
+        assert!(gui.extra().ab_active);
+        assert_eq!(gui.extra().ab, Some(first.clone()));
+        assert!(gui.host.set_log.lock().unwrap().is_empty());
+        gui.set_level(0.8);
+        let mut ex = gui.extra();
+        ex.slot_refs[1] = Some(factory_ref(3));
+        gui.set_extra(ex);
+        let second = snapshot(&gui.params, &gui.extra());
+        gui.click("A");
+        assert!(!gui.extra().ab_active);
+        assert_eq!(gui.level_write(), Some(0.2));
+        assert_eq!(gui.extra().slot_refs, first.slot_refs);
+        assert_eq!(gui.extra().ab, Some(second.clone()));
+        gui.set_level(0.2); // acknowledge the host write
+        gui.click("B");
+        gui.settle_loads();
+        assert_eq!(gui.level_write(), Some(0.8));
+        assert_eq!(gui.extra().ab, Some(first.clone()));
+        assert_eq!(
+            gui.extra().slot_refs[1].as_ref().unwrap().path,
+            "factory:0003"
+        );
+        gui.set_level(0.8);
+        gui.click("A");
+        assert_eq!(gui.level_write(), Some(0.2));
+        assert_eq!(gui.extra().ab.as_ref().unwrap().values, second.values);
+        assert_eq!(gui.extra().slot_refs, first.slot_refs);
+        assert_eq!(gui.params.loads.generation[0].load(Ordering::Acquire), 0);
+        // A snapshot from a different parameter table cannot write parameters.
+        let mut ex = gui.extra();
+        ex.ab = Some(Snapshot::default());
+        gui.set_extra(ex);
+        gui.host.set_log.lock().unwrap().clear();
+        gui.click("B");
+        assert!(gui.host.set_log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn undo_random_after_state_round_trip_restores_parameters_and_slots() {
+        let fixture = crate::factory_bank::tests::Fixture::new();
+        let mut gui = BrowserGui::new(Some(fixture.bank()));
+        gui.set_level(0.23);
+        let mut ex = gui.extra();
+        ex.slot_refs[0] = Some(factory_ref(1));
+        gui.set_extra(ex);
+        let before = snapshot(&gui.params, &gui.extra());
+        gui.click("⚄ RND");
+        assert_eq!(gui.extra().pre_roll, Some(before.clone()));
+        let bytes = mangle_dsp::state::serialize(&gui.extra());
+        let mut restored = mangle_dsp::state::deserialize(&bytes).unwrap();
+        // Model a later edit and reopening the editor after the project loads.
+        restored.slot_refs = Default::default();
+        gui.set_extra(restored);
+        gui.st = UiState {
+            bank_override: Some(Some(fixture.bank())),
+            ..Default::default()
+        };
+        gui.set_level(0.77);
+        gui.host.set_log.lock().unwrap().clear();
+        gui.click("TOOLS");
+        gui.click("UNDO RND");
+        gui.settle_loads();
+        assert_eq!(gui.level_write(), Some(0.23));
+        assert_eq!(gui.host.set_log.lock().unwrap().len(), 1);
+        assert!(gui.extra().pre_roll.is_none());
+        assert_eq!(
+            gui.extra().slot_refs[0].as_ref().unwrap().path,
+            "factory:0001"
+        );
+        assert_eq!(
+            gui.params.loads.status.lock().unwrap()[0],
+            SlotStatus::Loaded
+        );
+        assert!(!gui.params.panic.load(Ordering::Acquire));
     }
 
     /// Index last written to the row-1 matrix cell `col` through the host
