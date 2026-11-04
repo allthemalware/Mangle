@@ -180,3 +180,6 @@ Mangle is licensed under **GPLv3** (see `LICENSE`). Only the CLAP plugin is
 built; building VST3 would require implementing `Vst3Plugin` and enabling
 nih-plug's `vst3` feature (whose GPLv3 `vst3-sys` binding is compatible with
 this license).
+
+## Factory bank
+`factory/` holds the factory presets and source sounds (formats in `FACTORY.md`; recorded sources are CC0 from VCSL and VSCO 2 CE, licence per file in `sources.tsv`). Install it with `tools/install-factory.sh`, then open the BROWSER tab. Regenerate the generated sources with `cargo xtask gen-sources <dir>`.
