@@ -30,11 +30,13 @@ fn defaults_have_no_v3_fields() {
 
 #[test]
 fn v3_fields_round_trip() {
-    let mut s = ExtraState::default();
-    s.pre_roll = Some(snap(0.1));
-    s.ab = Some(snap(0.6));
-    s.ab_active = true;
-    s.factory_preset = Some(513);
+    let s = ExtraState {
+        pre_roll: Some(snap(0.1)),
+        ab: Some(snap(0.6)),
+        ab_active: true,
+        factory_preset: Some(513),
+        ..Default::default()
+    };
     let back = state::deserialize(&state::serialize(&s)).expect("round trip");
     assert_eq!(back.pre_roll, s.pre_roll);
     assert_eq!(back.ab, s.ab);
@@ -56,9 +58,11 @@ fn v2_blob_loads_with_defaults() {
 #[test]
 fn existing_fields_keep_their_bytes() {
     // v3 only appends: the v2 prefix of a v3 blob must equal the v2 serialisation.
-    let mut a = ExtraState::default();
-    a.embed_samples = true;
-    a.instance_seed = 99;
+    let mut a = ExtraState {
+        embed_samples: true,
+        instance_seed: 99,
+        ..Default::default()
+    };
     let plain = state::serialize(&a);
     a.pre_roll = Some(snap(0.3));
     let with = state::serialize(&a);
@@ -67,11 +71,13 @@ fn existing_fields_keep_their_bytes() {
 
 #[test]
 fn hostile_snapshots_are_rejected_or_sanitised() {
-    let mut s = ExtraState::default();
-    s.pre_roll = Some(Snapshot {
-        values: vec![f32::NAN, 2.0, -1.0],
-        slot_refs: Default::default(),
-    });
+    let s = ExtraState {
+        pre_roll: Some(Snapshot {
+            values: vec![f32::NAN, 2.0, -1.0],
+            slot_refs: Default::default(),
+        }),
+        ..Default::default()
+    };
     let back = state::deserialize(&state::serialize(&s)).expect("loads");
     let v = back.pre_roll.expect("kept").values;
     assert!(v.iter().all(|x| x.is_finite() && (0.0..=1.0).contains(x)));
