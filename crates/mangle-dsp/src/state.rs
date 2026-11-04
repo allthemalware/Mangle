@@ -2,13 +2,14 @@
 //!
 //! Everything the host's param store can't carry lives here: the nine
 //! drawable curves, the RANDOM per-unit locks and settings, and the sample
-//! slot references. Serialized as a small versioned little-endian blob,
+//! slot references, saved patch snapshots, and last factory preset. Serialized
+//! as a small versioned little-endian blob,
 //! hex-encoded into nih-plug's string-keyed field store by the shell.
 //!
-//! Format v2 (v1 is the prefix up to and including the slot refs):
+//! Format v3 (v1 is the prefix up to and including the slot refs):
 //! ```text
 //! b"MNGL"  magic
-//! u16      version (2)
+//! u16      version (3)
 //! 9 × 256 × f32   curves (Loop 1–3, LFO 1–6)
 //! u32      lock bits (see ORDER below)
 //! f32      random amount
@@ -26,6 +27,11 @@
 //! u8       dest loop-lfo bits
 //! 6 × (f32 view start, f32 view end)  waveform zoom per slot
 //! u8       embed samples (0/1)
+//! -- appended in v3 --
+//! u8       flags: bit0 pre_roll, bit1 ab, bit2 ab_active, bit3 factory_preset
+//! u16      factory preset (if bit3)
+//! snapshot pre_roll (if bit0), then snapshot ab (if bit1)
+//! snapshot = u32 value count, count × f32 normalized values, 6 × slot ref
 //! ```
 //! The format is **append-only**: the fields above are a fixed prefix in every
 //! version, and later versions only append after them. `deserialize` therefore
@@ -40,12 +46,19 @@ use crate::curve::Curve;
 use crate::random::{DestPool, GrainParamPool, LfoParamPool, RandomLocks, RandomPools, SourcePool};
 
 pub const MAGIC: [u8; 4] = *b"MNGL";
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SlotRef {
     pub path: String,
     pub content_hash: u64,
+}
+
+/// A saved patch's normalized parameter values and sample references.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Snapshot {
+    pub values: Vec<f32>,
+    pub slot_refs: [Option<SlotRef>; 6],
 }
 
 /// All non-param state.
@@ -65,6 +78,12 @@ pub struct ExtraState {
     pub slot_views: [(f32, f32); 6],
     /// Store sample audio in the state instead of only referencing files.
     pub embed_samples: bool,
+    /// Patch saved before the last randomization.
+    pub pre_roll: Option<Snapshot>,
+    /// Saved A/B comparison patch.
+    pub ab: Option<Snapshot>,
+    pub ab_active: bool,
+    pub factory_preset: Option<u16>,
 }
 
 impl Default for ExtraState {
@@ -90,6 +109,10 @@ impl Default for ExtraState {
             pools: RandomPools::default(),
             slot_views: [(0.0, 1.0); 6],
             embed_samples: false,
+            pre_roll: None,
+            ab: None,
+            ab_active: false,
+            factory_preset: None,
         }
     }
 }
@@ -154,6 +177,29 @@ pub fn content_hash(bytes: &[u8]) -> u64 {
 
 // ----------------------------------------------------------- writer ---
 
+fn write_slot_refs(out: &mut Vec<u8>, slots: &[Option<SlotRef>; 6]) {
+    for slot in slots {
+        match slot {
+            None => out.push(0),
+            Some(r) => {
+                out.push(1);
+                let bytes = r.path.as_bytes();
+                out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+                out.extend_from_slice(bytes);
+                out.extend_from_slice(&r.content_hash.to_le_bytes());
+            }
+        }
+    }
+}
+
+fn write_snapshot(out: &mut Vec<u8>, snapshot: &Snapshot) {
+    out.extend_from_slice(&(snapshot.values.len() as u32).to_le_bytes());
+    for value in &snapshot.values {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    write_slot_refs(out, &snapshot.slot_refs);
+}
+
 pub fn serialize(state: &ExtraState) -> Vec<u8> {
     let mut out = Vec::with_capacity(4 + 2 + 9 * 256 * 4 + 64);
     out.extend_from_slice(&MAGIC);
@@ -167,18 +213,7 @@ pub fn serialize(state: &ExtraState) -> Vec<u8> {
     out.extend_from_slice(&state.random_amount.to_le_bytes());
     out.extend_from_slice(&state.random_complexity.to_le_bytes());
     out.extend_from_slice(&state.last_seed.to_le_bytes());
-    for slot in state.slot_refs.iter() {
-        match slot {
-            None => out.push(0),
-            Some(r) => {
-                out.push(1);
-                let bytes = r.path.as_bytes();
-                out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-                out.extend_from_slice(bytes);
-                out.extend_from_slice(&r.content_hash.to_le_bytes());
-            }
-        }
-    }
+    write_slot_refs(&mut out, &state.slot_refs);
     out.extend_from_slice(&state.instance_seed.to_le_bytes());
     out.extend_from_slice(&state.pools.grain.to_bits().to_le_bytes());
     out.extend_from_slice(&state.pools.lfo.to_bits().to_le_bytes());
@@ -193,6 +228,20 @@ pub fn serialize(state: &ExtraState) -> Vec<u8> {
         out.extend_from_slice(&e.to_le_bytes());
     }
     out.push(state.embed_samples as u8);
+    let flags = state.pre_roll.is_some() as u8
+        | (state.ab.is_some() as u8) << 1
+        | (state.ab_active as u8) << 2
+        | (state.factory_preset.is_some() as u8) << 3;
+    out.push(flags);
+    if let Some(preset) = state.factory_preset {
+        out.extend_from_slice(&preset.to_le_bytes());
+    }
+    if let Some(snapshot) = &state.pre_roll {
+        write_snapshot(&mut out, snapshot);
+    }
+    if let Some(snapshot) = &state.ab {
+        write_snapshot(&mut out, snapshot);
+    }
     out
 }
 
@@ -232,6 +281,45 @@ impl<'a> Reader<'a> {
 
     fn f32(&mut self) -> Option<f32> {
         Some(f32::from_le_bytes(self.take(4)?.try_into().ok()?))
+    }
+
+    fn slot_refs(&mut self) -> Option<[Option<SlotRef>; 6]> {
+        let mut slots: [Option<SlotRef>; 6] = Default::default();
+        for slot in &mut slots {
+            *slot = match self.u8()? {
+                0 => None,
+                _ => {
+                    let len = self.u32()? as usize;
+                    if len > 16_384 {
+                        return None; // sanity cap on path length
+                    }
+                    let path = String::from_utf8(self.take(len)?.to_vec()).ok()?;
+                    let content_hash = self.u64()?;
+                    Some(SlotRef { path, content_hash })
+                }
+            };
+        }
+        Some(slots)
+    }
+
+    fn snapshot(&mut self) -> Option<Snapshot> {
+        let n = self.u32()? as usize;
+        if n > 4096 {
+            return None;
+        }
+        let mut values = Vec::with_capacity(n);
+        for _ in 0..n {
+            let value = self.f32()?;
+            values.push(if value.is_finite() {
+                value.clamp(0.0, 1.0)
+            } else {
+                0.0
+            });
+        }
+        Some(Snapshot {
+            values,
+            slot_refs: self.slot_refs()?,
+        })
     }
 }
 
@@ -278,20 +366,7 @@ pub fn deserialize(data: &[u8]) -> Option<ExtraState> {
         0.6
     };
     state.last_seed = r.u64()?;
-    for slot in state.slot_refs.iter_mut() {
-        *slot = match r.u8()? {
-            0 => None,
-            _ => {
-                let len = r.u32()? as usize;
-                if len > 16_384 {
-                    return None; // sanity cap on path length
-                }
-                let path = String::from_utf8(r.take(len)?.to_vec()).ok()?;
-                let content_hash = r.u64()?;
-                Some(SlotRef { path, content_hash })
-            }
-        };
-    }
+    state.slot_refs = r.slot_refs()?;
     if version >= 2 {
         state.instance_seed = r.u64()?;
         state.pools.grain = GrainParamPool::from_bits(r.u32()?);
@@ -308,6 +383,19 @@ pub fn deserialize(data: &[u8]) -> Option<ExtraState> {
             *view = if valid { (s, e) } else { (0.0, 1.0) };
         }
         state.embed_samples = r.u8()? != 0;
+    }
+    if version >= 3 {
+        let flags = r.u8()?;
+        state.ab_active = flags & 4 != 0;
+        if flags & 8 != 0 {
+            state.factory_preset = Some(r.u16()?);
+        }
+        if flags & 1 != 0 {
+            state.pre_roll = Some(r.snapshot()?);
+        }
+        if flags & 2 != 0 {
+            state.ab = Some(r.snapshot()?);
+        }
     }
     Some(state)
 }
@@ -409,9 +497,9 @@ mod tests {
 
     #[test]
     fn loads_newer_version_keeping_the_known_prefix() {
-        // A hypothetical future v3 blob: a valid v2 payload with the version
-        // bumped to 3 and extra trailing bytes (fields this code can't read).
-        // Every v1 and v2 field must still load; the trailing bytes are ignored.
+        // A hypothetical future blob: a valid current payload with the version
+        // bumped and extra trailing bytes (fields this code can't read).
+        // Every known field must still load; the trailing bytes are ignored.
         let mut st = ExtraState::default();
         st.curves[3] = Curve::random_walk(9);
         st.locks.lfo[2] = true;
@@ -426,10 +514,14 @@ mod tests {
         st.pools.sources.key = true;
         st.slot_views[0] = (0.5, 0.6);
         st.embed_samples = true;
+        st.pre_roll = Some(Snapshot::default());
+        st.ab = Some(Snapshot::default());
+        st.ab_active = true;
+        st.factory_preset = Some(42);
 
         let mut bytes = serialize(&st);
-        bytes[4] = 3; // version u16 (LE) low byte: 2 -> 3
-        bytes.extend_from_slice(&[0xAA; 16]); // appended "v3" data, unknown to us
+        bytes[4..6].copy_from_slice(&(VERSION + 1).to_le_bytes());
+        bytes.extend_from_slice(&[0xAA; 16]); // unknown appended data
 
         let back = deserialize(&bytes).expect("a newer-version blob must still load");
         assert_eq!(back.curves[3].0[..], st.curves[3].0[..]);
@@ -441,6 +533,10 @@ mod tests {
         assert_eq!(back.pools, st.pools);
         assert_eq!(back.slot_views, st.slot_views);
         assert!(back.embed_samples);
+        assert_eq!(back.pre_roll, st.pre_roll);
+        assert_eq!(back.ab, st.ab);
+        assert_eq!(back.ab_active, st.ab_active);
+        assert_eq!(back.factory_preset, st.factory_preset);
     }
 
     #[test]
@@ -458,7 +554,8 @@ mod tests {
         });
         let mut bytes = serialize(&st);
         let v2_len = 8 + 4 + 2 + 2 + 2 + 2 + 1 + 1 + 6 * 8 + 1;
-        bytes.truncate(bytes.len() - v2_len);
+        let v3_len = 1; // flags only for default v3 fields
+        bytes.truncate(bytes.len() - v2_len - v3_len);
         bytes[4] = 1;
         bytes[5] = 0;
         let back = deserialize(&bytes).expect("v1 blob must load");
@@ -468,6 +565,87 @@ mod tests {
         assert_eq!(back.pools, RandomPools::default());
         assert_eq!(back.slot_views, [(0.0, 1.0); 6]);
         assert!(!back.embed_samples);
+        assert!(back.pre_roll.is_none());
+        assert!(back.ab.is_none());
+        assert!(!back.ab_active);
+        assert_eq!(back.factory_preset, None);
+    }
+
+    #[test]
+    fn snapshot_count_is_bounded() {
+        for n in [0, 4096, 4097] {
+            let state = ExtraState {
+                pre_roll: Some(Snapshot {
+                    values: vec![0.5; n],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let back = deserialize(&serialize(&state));
+            if n <= 4096 {
+                assert_eq!(back.unwrap().pre_roll, state.pre_roll);
+            } else {
+                assert!(back.is_none());
+            }
+        }
+        let mut bytes = serialize(&ExtraState::default());
+        *bytes.last_mut().unwrap() = 1;
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(deserialize(&bytes).is_none());
+    }
+
+    #[test]
+    fn v3_flags_and_field_order() {
+        let tail_at = serialize(&ExtraState::default()).len() - 1;
+        for flags in 0u8..16 {
+            let state = ExtraState {
+                pre_roll: (flags & 1 != 0).then(|| Snapshot {
+                    values: vec![0.25],
+                    ..Default::default()
+                }),
+                ab: (flags & 2 != 0).then(|| Snapshot {
+                    values: vec![0.75],
+                    ..Default::default()
+                }),
+                ab_active: flags & 4 != 0,
+                factory_preset: (flags & 8 != 0).then_some(513),
+                ..Default::default()
+            };
+            let bytes = serialize(&state);
+            let mut expected = vec![flags];
+            if flags & 8 != 0 {
+                expected.extend_from_slice(&[1, 2]);
+            }
+            for (bit, value) in [(1, 0.25f32), (2, 0.75f32)] {
+                if flags & bit != 0 {
+                    expected.extend_from_slice(&[1, 0, 0, 0]);
+                    expected.extend_from_slice(&value.to_le_bytes());
+                    expected.extend_from_slice(&[0; 6]);
+                }
+            }
+            assert_eq!(&bytes[tail_at..], expected);
+            let back = deserialize(&bytes).unwrap();
+            assert_eq!(back.pre_roll, state.pre_roll);
+            assert_eq!(back.ab, state.ab);
+            assert_eq!(back.ab_active, state.ab_active);
+            assert_eq!(back.factory_preset, state.factory_preset);
+            for cut in tail_at..bytes.len() {
+                assert!(deserialize(&bytes[..cut]).is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn snapshot_values_sanitize_to_normalized_range() {
+        let state = ExtraState {
+            ab: Some(Snapshot {
+                values: vec![f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, 0.4],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let back = deserialize(&serialize(&state)).unwrap();
+        assert_eq!(back.ab.unwrap().values, [0.0, 0.0, 0.0, 0.0, 1.0, 0.4]);
     }
 
     #[test]
