@@ -6,6 +6,7 @@
 
 pub mod curve;
 pub mod engine;
+pub mod factory;
 pub mod fft;
 pub mod filter;
 pub mod grain;
