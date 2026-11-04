@@ -1,0 +1,13 @@
+mangle-preset 1
+name Sub Sub Sine 2
+category Basses
+author Mangle
+slot 0 0197
+p 070000 0.1890
+p 020001 0.4636
+p 020004 0.0429
+p 020006 0.6068
+p 02000e 0.0000
+p 090000 1.0000
+p 090002 0.4597
+p 090003 0.1000

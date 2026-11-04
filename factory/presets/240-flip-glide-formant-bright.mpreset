@@ -1,0 +1,15 @@
+mangle-preset 1
+name Flip Glide Formant Bright
+category FX
+author Mangle
+slot 0 0136
+p 070000 0.7559
+p 000002 0.7490
+p 020001 0.3894
+p 020004 0.1947
+p 020006 0.6187
+p 020014 0.6667
+p 030002 0.3108
+p 080000 0.2059
+p 080001 1.0000
+p 080002 0.6125

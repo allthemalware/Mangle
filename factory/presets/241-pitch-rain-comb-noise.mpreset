@@ -1,0 +1,14 @@
+mangle-preset 1
+name Pitch Rain Comb Noise
+category FX
+author Mangle
+slot 0 0399
+p 000002 0.6053
+p 020001 0.3962
+p 020004 0.5202
+p 020006 0.4726
+p 02000f 1.0000
+p 020015 0.7143
+p 080000 0.3824
+p 080001 0.7991
+p 080002 0.5500

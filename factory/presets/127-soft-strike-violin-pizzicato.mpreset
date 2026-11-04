@@ -1,0 +1,14 @@
+mangle-preset 1
+name Soft Strike Violin Pizzicato
+category Plucks
+author Mangle
+slot 0 0617
+p 070000 0.3543
+p 020001 0.1937
+p 020004 0.0390
+p 020006 0.7255
+p 020013 1.0000
+p 020011 0.4323
+p 090000 1.0000
+p 090002 0.7782
+p 090003 0.0500

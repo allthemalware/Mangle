@@ -1,0 +1,524 @@
+0500	Wine Glass Sustain D5
+0501	Kalimba A4
+0502	Concert Harp A2
+0503	Harmonica Soft C5
+0504	Tenor Sax Non-Vib C3
+0505	Didgeridoo Sustain
+0506	FM Piano C2
+0507	Clavisynth E3
+0508	Pipe Organ Loud
+0509	Violin Arco Vibrato A3
+0510	Cello Pizzicato A2
+0511	French Horn Mute D#3
+0512	Flute Vibrato A3
+0513	Marimba Hit G4
+0514	Glockenspiel Medium C5
+0515	Gong Hit
+0516	Ball Whistle Long
+0517	French Horn Mute A#1
+0518	Alto Recorder Sus Vib A#3
+0519	French Horn Staccato A#1
+0520	Alto Recorder Sustain A#3
+0521	French Horn Sustain A#1
+0522	Bass Recorder Sus Vib A2
+0523	Trombone Buzz A#1
+0524	Bass Recorder Sustain A#2
+0525	Trombone Fall A#1
+0526	Soprano Recorder Sus A#4
+0527	Trombone Short A#1
+0528	Tenor Recorder Sus Vib A3
+0529	Trombone Sustain A#1
+0530	Tenor Recorder Sustain A#3
+0531	Trombone Vibrato A#1
+0532	Small Ocarina Sustain A#4
+0533	Tenor Trombone Stac A#0
+0534	Ocarina Sustain A#4
+0535	Tenor Trombone Sustain A#0
+0536	Ocarina Sus Vib A#4
+0537	Tenor Trombone Vibrato A#1
+0538	Pipe Organ Loud A1
+0539	Trumpet Harmon Mute A#2
+0540	Pipe Organ Pedal A1
+0541	Trumpet Staccato A#3
+0542	Pipe Organ Quiet A1
+0543	Trumpet Straight Mute A#2
+0544	Pipe Organ Pedal A1 2
+0545	Trumpet Sustain A#3
+0546	Renaissance Organ 4ft A#1
+0547	Trumpet Sus Vib A#3
+0548	Renaissance Organ 8ft A#1
+0549	Tuba Staccato A#0
+0550	Renaissance Organ Full A#1
+0551	Tuba Sustain A#0
+0552	Toy Train Whistle
+0553	Pipe Organ Loud 2
+0554	Harmonica Normal C3
+0555	Pipe Organ Quiet
+0556	Harmonica Soft C3
+0557	Upright Piano C1
+0558	Harmonica Vibrato C3
+0559	Upright Piano
+0560	Harmonica Accented A3
+0561	Alien FX
+0562	Harmonica Hand Vibrato A3
+0563	Tom Tom Frame
+0564	Harmonica Sustain A3
+0565	Nepalese Bell Short
+0566	Harmonica Vibrato A3
+0567	Glockenspiel Down Gliss
+0568	Harmonica Accented C2
+0569	Anvil Hit
+0570	Harmonica Sustain C2
+0571	Glockenspiel Hit C6
+0572	Harmonica Vibrato C2
+0573	Marimba Hit B2
+0574	Siren Whistle
+0575	Timpani Hit
+0576	Didgeridoo Bark Down
+0577	Xylophone Hit C4
+0578	Saxello Non Vibrato A#2
+0579	Triangle Hit
+0580	Saxello Staccato A#2
+0581	Cello Pizzicato A2 2
+0582	Saxello Vibrato A#2
+0583	Cello Spiccato A2
+0584	Tenor Sax Non Vibrato A#1
+0585	Cello Vibrato Sustain A2
+0586	Tenor Sax Staccato A#3
+0587	Cello Tremolo A2
+0588	Tenor Sax Vibrato A#1
+0589	Concert Harp A2 2
+0590	Concert Harp A2 3
+0591	Contrabass Pizzicato A#0
+0592	Folk Harp A#1
+0593	Contrabass Spiccato A#0
+0594	Strumstick Finger D2
+0595	Contrabass Sustain A#0
+0596	Dan Tranh FX
+0597	Contrabass Vibrato A#0
+0598	Dan Tranh Down Gliss
+0599	Contrabass Tremolo B2
+0600	Dan Tranh B1
+0601	Violin Arco Vibrato A3 2
+0602	Dan Tranh Tremolo B1
+0603	Violin Pizzicato A3
+0604	Dan Tranh Vibrato B1
+0605	Violin Tremolo A2
+0606	Grand Piano Sustain A2
+0607	Violin Spiccato A2
+0608	Grand Piano Sustain A#-1
+0609	Viola Pizzicato A3
+0610	Grand Piano A#0
+0611	Viola Spiccato A3
+0612	Grand Piano Sustain A#4
+0613	Viola Vibrato Sustain A3
+0614	Harpsichord Lute A#0
+0615	Viola Tremolo A3
+0616	Harpsichord Sustain A#0
+0617	Violin Pizzicato A2
+0618	Harpsichord High A#1
+0619	Violin Spiccato A2 2
+0620	Flemish Harpsichord A#0
+0621	Violin Tremolo A2 2
+0622	French Harpsichord A#0
+0623	Violin Sustain Vibrato A2
+0624	Italian Harpsichord A#0
+0625	Bass Drum
+0626	Harpsichord Sustain A#0 2
+0627	High Bongo
+0628	Bowed Psaltery A#3
+0629	Ethnic Conga Muted
+0630	Plucked Psaltery A#3
+0631	Ethnic Conga Open
+0632	Spiccato Psaltery A#3
+0633	Large Ethnic Drum Rimshot
+0634	Piano Pedal Off
+0635	Large Ethnic Drum Brush
+0636	Piano Pedal On
+0637	Large Ethnic Drum Mallet
+0638	Knight Upright Piano A-1
+0639	Large Ethnic Drum Sticks
+0640	Yamaha Upright Piano C0
+0641	Snare Drum
+0642	TX81Z Clavisynth C0
+0643	Snare Drum 2
+0644	TX81Z FM Piano C0
+0645	Marching Snare Drum
+0646	TX81Z Piano C0
+0647	Tenor Drum High
+0648	Wine Glass Sustain F#4
+0649	Tenor Drum Low
+0650	Wine Glass Sustain F#4 2
+0651	Crash Cymbal Loose
+0652	Kenyan Kalimba B2
+0653	Suspended Cymbal Mallet
+0654	Tanzanian Kalimba A#2
+0655	Gong Hit 2
+0656	Gandanga Mbira A#1
+0657	Triangle Hit 2
+0658	Nyamaropa Mbira A#1
+0659	Triangle Hit 3
+0660	Nyunga Nyunga Mbira A#2
+0661	Triangle Hit 4
+0662	High Agogo Bell
+0663	Triangle Hit 5
+0664	Agogo Bell
+0665	Finger Cymbals
+0666	Anvil Hit 2
+0667	Claves
+0668	Balafon Hard Mallet C#3
+0669	Bassoon Sustain A#0
+0670	Balafon Soft Mallet C#3
+0671	Bassoon Vibrato A1
+0672	Balafon Mallet C#3
+0673	Clarinet Sustain A#2
+0674	Bell Tree Hit A#5
+0675	Flute Vibrato A4
+0676	Bell Tree Stroke
+0677	Flute Staccato A3
+0678	Bowed Brake Drum
+0679	Flute Non-Vibrato A3
+0680	Cabasa Hit
+0681	Flute Vibrato A3 2
+0682	Cajon Hit
+0683	Oboe Staccato A#2
+0684	Hand Clap
+0685	Oboe Sustain A#2
+0686	Clash Cymbal Crash
+0687	Oboe Vibrato A#2
+0688	Clash Cymbal Crash 2
+0689	Piccolo Sustain C5
+0690	Claves Hit
+0691	Claves Hit 2
+0692	Cowbell Hit
+0693	Finger Cymbal
+0694	Flexatone Hit
+0695	Glockenspiel C5
+0696	Gong Hit 3
+0697	Guiro Fast
+0698	Guiro Long
+0699	Nepalese Handbell
+0700	Hand Chime A#3
+0701	Hi-Hat Closed
+0702	Marimba Hit B2 2
+0703	Wind Chimes
+0704	Ratchet Crank
+0705	Large Shaker Hit
+0706	Slapstick Hit
+0707	Sleigh Bells Hit
+0708	Slit Drum
+0709	Bowed Cymbal
+0710	Bowed Cymbal 2
+0711	Tambourine Hit
+0712	Tambourine Hit 2
+0713	Tambourine Hit 3
+0714	Tambourine Hit 4
+0715	Triangle Hit 6
+0716	Triangle Hit 7
+0717	Triangle Hit 8
+0718	Triangle Hit 9
+0719	Triangle Hit 10
+0720	Tubular Bell A#3
+0721	Tubular Bell A4
+0722	Tubular Glockenspiel A0
+0723	Vibraphone Bowed A2
+0724	Vibraphone Hard A2
+0725	Vibraphone Soft A2
+0726	Vibraslap Hit
+0727	Woodblock Click
+0728	Xylophone Hard C4
+0729	Xylophone Medium C4
+0730	Xylophone Soft C4
+0731	Ocean Drum Sustain
+0732	Bass Drum Hit
+0733	Bass Drum Crescendo
+0734	Bass Drum Hit 2
+0735	Bongo Hit
+0736	Conga Hit
+0737	Darbuka Hit
+0738	Frame Drum Hand
+0739	Snare Drum Hit
+0740	Snare Drum Hit 2
+0741	Marching Snare Hit
+0742	High Tenor Tom Hit
+0743	Low Tenor Tom Hit
+0744	Snare Drum Hit 3
+0745	Snare Drum Hit 4
+0746	Snare Drum Hit 5
+0747	Rope Snare Sidestick
+0748	Rope Snare Hit High
+0749	Rope Snare Hit Low
+0750	Timpani Hit 2
+0751	Timpani Hit 3
+0752	High Tom Rimshot
+0753	High Tom Mallet
+0754	High Tom Stick
+0755	Low Tom Rimshot
+0756	Low Tom Mallet
+0757	Low Tom Stick
+0758	Ball Whistle Short
+0759	French Horn Mute D#2
+0760	Alto Recorder Vib E4
+0761	French Horn Staccato D2
+0762	Alto Recorder Sus E4
+0763	French Horn Sustain D#1
+0764	Bass Recorder Vib D3
+0765	Trombone Buzz D#2
+0766	Bass Recorder Sustain E3
+0767	Trombone Fall D#2
+0768	Soprano Recorder Sus D5
+0769	Trombone Short D2
+0770	Tenor Recorder Vib D3
+0771	Trombone Sustain D#3
+0772	Tenor Recorder Sus D4
+0773	Trombone Vibrato C3
+0774	Small Ocarina Sustain C5
+0775	Tenor Trombone Stac D3
+0776	Ocarina Sustain C#5
+0777	Tenor Trombone Sus D#1
+0778	Ocarina Vibrato C4
+0779	Tenor Trombone Vib D3
+0780	Pipe Organ Loud C6
+0781	Trumpet Harmon Mute D#3
+0782	Pipe Organ Pedal D#1
+0783	Trumpet Staccato D#3
+0784	Pipe Organ Quiet C6
+0785	Trumpet Straight Mute D3
+0786	Pipe Organ Pedal D#1 2
+0787	Trumpet Sustain D#3
+0788	Renaissance Organ 4ft D5
+0789	Trumpet Vibrato D#3
+0790	Renaissance Organ 8ft D5
+0791	Tuba Staccato D2
+0792	Renaissance Organ D5
+0793	Tuba Sustain D#1
+0794	Train Whistle Med
+0795	Organ Loud
+0796	Harmonica Sustain E3
+0797	Organ Quiet
+0798	Harmonica Soft E4
+0799	Upright Piano C7
+0800	Harmonica Vibrato E3
+0801	Upright Piano 2
+0802	Harmonica Accented C5
+0803	Metal Hit
+0804	Harmonica Hand Vibrato C5
+0805	Sleigh Bell Hit
+0806	Harmonica Sustain C6
+0807	Nepalese Bells
+0808	Harmonica Vibrato C5
+0809	Glockenspiel Glissando
+0810	Harmonica Accented E3
+0811	Snare Tap
+0812	Harmonica Sustain E3 2
+0813	Glockenspiel G4
+0814	Harmonica Vibrato E3 2
+0815	Marimba C6
+0816	Siren Whistle 2
+0817	Timpani Hit 4
+0818	Didgeridoo Sustain 2
+0819	Xylophone G3
+0820	Saxello Sustain D4
+0821	Triangle Hit 11
+0822	Saxello Staccato D3
+0823	Cello Pizzicato D4
+0824	Saxello Vibrato D3
+0825	Cello Spiccato D4
+0826	Tenor Saxophone D5
+0827	Cello Sustain Vibrato D4
+0828	Tenor Saxophone D4
+0829	Cello Tremolo D4
+0830	Tenor Saxophone D3
+0831	Concert Harp D6
+0832	Concert Harp D6 2
+0833	Contrabass Pizzicato E1
+0834	Folk Harp E1
+0835	Contrabass Spiccato E0
+0836	Strumstick Finger A4
+0837	Contrabass Sustain E1
+0838	Dan Tranh FX 2
+0839	Contrabass Vibrato E1
+0840	Dan Tranh Glissando
+0841	Contrabass Tremolo E2
+0842	Dan Tranh D#3
+0843	Violin Arco Vibrato C7
+0844	Dan Tranh Tremolo D#3
+0845	Violin Pizzicato C7
+0846	Dan Tranh Vibrato D#3
+0847	Violin Tremolo E3
+0848	Grand Piano Sustain C6
+0849	Violin Spiccato C6
+0850	Grand Piano Sustain D#5
+0851	Viola Pizzicato D3
+0852	Grand Piano E1
+0853	Viola Spiccato C4
+0854	Grand Piano Sustain E5
+0855	Viola Sustain Vibrato D3
+0856	Harpsichord Lute D5
+0857	Viola Tremolo D5
+0858	Harpsichord Sustain D5
+0859	Violin Pizzicato D3
+0860	Harpsichord Far E2
+0861	Violin Ensemble Spiccato C4
+0862	Harpsichord Far E1
+0863	Violin Ensemble Tremolo D3
+0864	French Harpsichord D2
+0865	Violin Ensemble Vibrato D3
+0866	Italian Harpsichord D#3
+0867	Bass Drum Muted
+0868	Harpsichord Sustain D1
+0869	Low Bongo Hit
+0870	Bowed Psaltery D5
+0871	Conga High Muted Hit
+0872	Plucked Psaltery D5
+0873	Conga Low Open Hit
+0874	Bowed Psaltery Spiccato D5
+0875	Large Drum Rimshot
+0876	Upright Piano Pedal Off
+0877	Large Drum Hand Hit
+0878	Upright Piano Pedal On
+0879	Large Drum Mallet Hit
+0880	Upright Piano Sustain G6
+0881	Large Drum Sticks Hit
+0882	Upright Piano Sustain C6
+0883	Snare Drum Hit 6
+0884	TX81Z Clavisynth E1
+0885	Snare Drum Open Hit
+0886	TX81Z FM Piano E3
+0887	Marching Snare Drum Hit
+0888	TX81Z Piano E2
+0889	High Tenor Drum Hit
+0890	Wine Glass Fast A#4
+0891	Low Tenor Drum Hit
+0892	Wine Glass Slow A#4
+0893	Crash Cymbal Hit
+0894	Kenyan Kalimba D#3
+0895	Suspended Cymbal Hit
+0896	Tanzanian Kalimba D#4
+0897	Gong Hard Hit
+0898	Mbira Mavembe D3
+0899	Triangle Muted Hit
+0900	Mbira Dzavadzimu D#2
+0901	Triangle Hit 12
+0902	Nyunga Nyunga D4
+0903	Triangle Hit 13
+0904	Agogo Bell High
+0905	Triangle Hit 14
+0906	Agogo Bell Hit
+0907	Cowbell Hit 2
+0908	Anvil Hit 3
+0909	Tambourine Down Hit
+0910	Balafon Hard Mallet C5
+0911	Bassoon Sustain C3
+0912	Balafon Soft Mallet C4
+0913	Bassoon Vibrato C4
+0914	Balafon Mallet C4
+0915	Clarinet Long Sustain D4
+0916	Bell Tree Hit D5
+0917	Flute Vibrato C6
+0918	Bell Tree Stroke 2
+0919	Flute Staccato C4
+0920	Brake Drum Yarn Hit
+0921	Flute Non Vibrato C4
+0922	Cabasa Rub
+0923	Flute Vibrato C5
+0924	Cajon Hit 2
+0925	Oboe Staccato D3
+0926	Oboe Sustain D4
+0927	Clash Cymbals Crash
+0928	Oboe Vibrato D4
+0929	Clash Cymbals Crash 2
+0930	Piccolo Sustain G4
+0931	Claves Hit 3
+0932	Cowbell Hit 3
+0933	Flexatone Long
+0934	Glockenspiel Medium C7
+0935	Gong Hit 4
+0936	Guiro Hit
+0937	Guiro Long Scraping
+0938	Hand Bells Hit
+0939	Hand Chimes Sustain D5
+0940	Hi Hat Cymbal Hit
+0941	Marimba Soft C6
+0942	Mark Tree Fast Ascending
+0943	Ratchet Crank 2
+0944	Large Shaker Shake
+0945	Slapstick Hit 2
+0946	Sleigh Bells Shake
+0947	Slit Drum Medium Hit
+0948	Suspended Cymbal Bell
+0949	Suspended Cymbal Hit 2
+0950	Tambourine Shake
+0951	Tambourine Shake 2
+0952	Tambourine Shake Down
+0953	Triangle Hit 15
+0954	Triangle Muted Hit 2
+0955	Triangle Hit 16
+0956	Triangle Hit 17
+0957	Triangle Hit 18
+0958	Tubular Bells D4
+0959	Tubular Bells Hit E4
+0960	Tubular Glockenspiel D1
+0961	Bowed Vibraphone D4
+0962	Hard Vibraphone D4
+0963	Soft Vibraphone D4
+0964	Vibraslap Hit 2
+0965	Woodblock Click 2
+0966	Hard Xylophone G3
+0967	Medium Xylophone G3
+0968	Soft Xylophone G3
+0969	Ocean Drum Sustain 2
+0970	Bass Drum Hit 3
+0971	Bass Drum Hit 4
+0972	Bass Drum Muted 2
+0973	Bongo Muted Hit
+0974	Conga Quinto Hit
+0975	Darbuka Hit 2
+0976	Frame Drum Hit
+0977	Snare Drum Hit 7
+0978	Snare Drum Open
+0979	Marching Snare Drum 2
+0980	High Tenor Tom Hit 2
+0981	Low Tenor Tom Hit 2
+0982	Modern Snare Hit
+0983	Modern Snare Hit 2
+0984	Modern Snare Rimshot
+0985	Rope Snare Stick Hit
+0986	Rope Snare High Hit
+0987	Rope Snare Low Hit
+0988	Timpani Hit 5
+0989	Timpani Hit 6
+0990	High Tom Rimshot 2
+0991	High Tom Mallet Hit
+0992	High Tom Stick Hit
+0993	Low Tom Rimshot 2
+0994	Low Tom Mallet Hit
+0995	Low Tom Stick Hit
+0996	French Horn Mute G#3
+0997	Alto Recorder Vib G#4
+0998	French Horn Staccato G1
+0999	Alto Recorder Sus G#4
+1000	French Horn Sus G1
+1001	Bass Recorder Vib G3
+1002	Trombone Buzz G2
+1003	Bass Recorder Sus G#3
+1004	Trombone Fall G2
+1005	Soprano Recorder Sus G5
+1006	Trombone Short G2
+1007	Tenor Recorder Vib G4
+1008	Trombone Sustain G3
+1009	Tenor Recorder Sus G#4
+1010	Trombone Vibrato G2
+1011	Small Ocarina Sustain G5
+1012	Tenor Trombone Stac F3
+1013	Ocarina Sustain G#4
+1014	Tenor Trombone Sus F3
+1015	Ocarina Vibrato G#4
+1016	Tenor Trombone Vib G#2
+1017	Pipe Organ Manual F#5
+1018	Trumpet Harmon Mute G#3
+1019	Pipe Organ Pedal F#3
+1020	Trumpet Staccato G3
+1021	Pipe Organ Manual F#5 2
+1022	Trumpet Straight Mute G3
+1023	Pipe Organ Pedal F#3 2

@@ -1,0 +1,12 @@
+mangle-preset 1
+name Frozen Clavisynth
+category Drones
+author Mangle
+slot 0 0507
+p 070000 0.4094
+p 000001 0.0000
+p 000002 0.6537
+p 020001 0.2214
+p 020006 0.6781
+p 020014 1.0000
+p 02000a 0.5192

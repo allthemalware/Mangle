@@ -1,0 +1,14 @@
+mangle-preset 1
+name Spectral Wash Low Tenor
+category FX
+author Mangle
+slot 0 0743
+p 000002 0.6916
+p 020014 1.0000
+p 020001 0.2876
+p 020006 0.7195
+p 02000a 0.1333
+p 080000 0.2059
+p 080001 0.5505
+p 080002 0.5375
+p 030002 0.1117

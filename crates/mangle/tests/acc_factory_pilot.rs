@@ -10,7 +10,21 @@ fn pilot_bank_loads_and_every_source_decodes() {
     let bank = mangle::FactoryBank::load(&repo_root()).expect("factory/ indexes");
     assert!(bank.sources.len() >= 32, "got {}", bank.sources.len());
     assert!(bank.warnings.is_empty(), "{:?}", bank.warnings);
-    for s in &bank.sources {
+    // The audio is rebuilt by tools/build_factory.sh and not committed; without it
+    // (a fresh checkout, CI) only the index and presets are checked.
+    if !repo_root().join("factory/sources").is_dir() {
+        eprintln!("factory audio not built; skipping decode check");
+        return;
+    }
+    // Decoding is slow in debug builds: check an evenly spaced sample unless
+    // MANGLE_FACTORY_FULL=1 asks for every source.
+    let full = std::env::var("MANGLE_FACTORY_FULL").is_ok_and(|v| v == "1");
+    let stride = if full {
+        1
+    } else {
+        (bank.sources.len() / 48).max(1)
+    };
+    for s in bank.sources.iter().step_by(stride) {
         let path = bank.source_path(s.id).expect("path");
         let loaded = mangle_loader::load_sample(&path, 48_000.0)
             .unwrap_or_else(|e| panic!("{:04} {}: {e}", s.id, s.name));

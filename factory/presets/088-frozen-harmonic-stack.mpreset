@@ -1,0 +1,12 @@
+mangle-preset 1
+name Frozen Harmonic Stack
+category Drones
+author Mangle
+slot 0 0369
+p 070000 0.2835
+p 000001 0.0000
+p 000002 0.6113
+p 020001 0.2594
+p 020006 0.6066
+p 020014 1.0000
+p 02000a 0.4551

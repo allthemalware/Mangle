@@ -1,0 +1,10 @@
+mangle-preset 1
+name Tight Pluck Italian Harpsichord
+category Plucks
+author Mangle
+slot 0 0624
+p 070000 0.1732
+p 020001 0.2490
+p 020004 0.0080
+p 020006 0.5127
+p 020013 1.0000

@@ -1,0 +1,10 @@
+mangle-preset 1
+name Tight Pluck Modal Bar
+category Plucks
+author Mangle
+slot 0 0233
+p 070000 0.4724
+p 020001 0.2201
+p 020004 0.0490
+p 020006 0.5143
+p 020013 1.0000

@@ -1,0 +1,11 @@
+mangle-preset 1
+name Stutter Triangle Hit
+category Rhythmic
+author Mangle
+slot 0 0905
+p 020002 1.0000
+p 020003 0.8333
+p 020006 0.3664
+p 020005 0.0000
+p 020007 0.2118
+p 020010 1.0000

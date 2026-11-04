@@ -1,0 +1,15 @@
+mangle-preset 1
+name Pitch Rain Bell Bright
+category FX
+author Mangle
+slot 0 0168
+p 070000 0.3780
+p 000002 0.6916
+p 020001 0.3113
+p 020004 0.6350
+p 020006 0.4415
+p 02000f 1.0000
+p 020015 0.7143
+p 080000 0.3824
+p 080001 0.6545
+p 080002 0.5500

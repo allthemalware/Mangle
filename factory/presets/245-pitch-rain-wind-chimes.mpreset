@@ -1,0 +1,14 @@
+mangle-preset 1
+name Pitch Rain Wind Chimes
+category FX
+author Mangle
+slot 0 0279
+p 000002 0.6864
+p 020001 0.3954
+p 020004 0.6003
+p 020006 0.5079
+p 02000f 1.0000
+p 020015 0.8571
+p 080000 0.3824
+p 080001 0.7334
+p 080002 0.5500

@@ -1,0 +1,12 @@
+mangle-preset 1
+name Pulse Bass Drum
+category Rhythmic
+author Mangle
+slot 0 0732
+p 020002 1.0000
+p 020003 0.6667
+p 020004 0.0138
+p 020006 0.4182
+p 020005 0.0000
+p 020011 0.0979
+p 02000a 0.1540

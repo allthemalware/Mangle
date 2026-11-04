@@ -1,0 +1,12 @@
+mangle-preset 1
+name Pulse Flexatone Long
+category Rhythmic
+author Mangle
+slot 0 0933
+p 020002 1.0000
+p 020003 0.8333
+p 020004 0.0010
+p 020006 0.4184
+p 020005 0.0000
+p 020011 0.1325
+p 02000a 0.1387

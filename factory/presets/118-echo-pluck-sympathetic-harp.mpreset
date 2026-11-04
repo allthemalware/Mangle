@@ -1,0 +1,13 @@
+mangle-preset 1
+name Echo Pluck Sympathetic Harp
+category Plucks
+author Mangle
+slot 0 0460
+p 070000 0.5669
+p 000002 0.5856
+p 020002 1.0000
+p 020003 0.8333
+p 020004 0.0113
+p 020006 0.5515
+p 020005 0.0000
+p 020013 0.6667

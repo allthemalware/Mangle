@@ -1,0 +1,15 @@
+mangle-preset 1
+name Flip Glide Singing Bowl
+category FX
+author Mangle
+slot 0 0272
+p 070000 0.3780
+p 000002 0.7459
+p 020001 0.4006
+p 020004 0.1556
+p 020006 0.6556
+p 020014 0.6667
+p 030002 0.3155
+p 080000 0.2059
+p 080001 1.0000
+p 080002 0.6125

@@ -1,0 +1,15 @@
+mangle-preset 1
+name Wide Keys Harpsichord Sustain
+category Keys
+author Mangle
+slot 0 0858
+p 070000 0.5827
+p 000002 0.8395
+p 020001 0.3927
+p 020004 0.1134
+p 020006 0.6102
+p 020007 0.1090
+p 020013 0.6667
+p 080000 0.2941
+p 080001 0.6783
+p 080002 0.6125

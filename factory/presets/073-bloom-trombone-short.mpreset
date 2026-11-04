@@ -1,0 +1,16 @@
+mangle-preset 1
+name Bloom Trombone Short
+category Drones
+author Mangle
+slot 0 0769
+p 070000 0.2992
+p 000001 0.0000
+p 000002 0.7207
+p 020001 0.4125
+p 020004 0.3034
+p 020006 0.7795
+p 020014 0.6667
+p 030002 0.0996
+p 080000 0.2059
+p 080001 0.5740
+p 080002 0.5375

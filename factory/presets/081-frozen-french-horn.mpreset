@@ -1,0 +1,12 @@
+mangle-preset 1
+name Frozen French Horn
+category Drones
+author Mangle
+slot 0 0759
+p 070000 0.3071
+p 000001 0.0000
+p 000002 0.6746
+p 020001 0.2304
+p 020006 0.6401
+p 020014 1.0000
+p 02000a 0.0474

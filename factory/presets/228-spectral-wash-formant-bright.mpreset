@@ -1,0 +1,15 @@
+mangle-preset 1
+name Spectral Wash Formant Bright
+category FX
+author Mangle
+slot 0 0122
+p 070000 0.5669
+p 000002 0.7610
+p 020014 1.0000
+p 020001 0.3029
+p 020006 0.6914
+p 02000a 0.5053
+p 080000 0.2059
+p 080001 0.6459
+p 080002 0.5375
+p 030002 0.0989

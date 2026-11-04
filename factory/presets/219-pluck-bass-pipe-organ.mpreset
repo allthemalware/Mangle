@@ -1,0 +1,14 @@
+mangle-preset 1
+name Pluck Bass Pipe Organ
+category Basses
+author Mangle
+slot 0 0542
+p 070000 0.2598
+p 020001 0.2345
+p 020004 0.0083
+p 020006 0.4668
+p 02000e 0.0000
+p 020013 1.0000
+p 090000 1.0000
+p 090002 0.5617
+p 090003 0.1400

@@ -1,0 +1,15 @@
+mangle-preset 1
+name Fog Bass Recorder
+category Drones
+author Mangle
+slot 0 0522
+p 070000 0.3543
+p 000001 0.0000
+p 000002 0.6312
+p 020001 0.3510
+p 020004 0.3008
+p 020006 0.7842
+p 020014 0.3333
+p 080000 0.2941
+p 080001 0.7108
+p 080002 0.6125

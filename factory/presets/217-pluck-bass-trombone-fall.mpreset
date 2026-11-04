@@ -1,0 +1,14 @@
+mangle-preset 1
+name Pluck Bass Trombone Fall
+category Basses
+author Mangle
+slot 0 1004
+p 070000 0.3386
+p 020001 0.2491
+p 020004 0.0295
+p 020006 0.4676
+p 02000e 0.0000
+p 020013 1.0000
+p 090000 1.0000
+p 090002 0.4816
+p 090003 0.1400

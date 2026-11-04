@@ -1,0 +1,12 @@
+mangle-preset 1
+name Frozen Bowed String
+category Drones
+author Mangle
+slot 0 0216
+p 070000 0.3780
+p 000001 0.0000
+p 000002 0.5726
+p 020001 0.2412
+p 020006 0.6932
+p 020014 1.0000
+p 02000a 0.0362

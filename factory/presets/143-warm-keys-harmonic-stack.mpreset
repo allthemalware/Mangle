@@ -1,0 +1,14 @@
+mangle-preset 1
+name Warm Keys Harmonic Stack
+category Keys
+author Mangle
+slot 0 0371
+p 070000 0.4724
+p 000002 0.5314
+p 020001 0.3632
+p 020004 0.0512
+p 020006 0.5765
+p 020013 0.6667
+p 090000 1.0000
+p 090002 0.6206
+p 090003 0.0926

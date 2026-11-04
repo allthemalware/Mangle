@@ -1,0 +1,15 @@
+mangle-preset 1
+name Bloom Shepard Drone
+category Drones
+author Mangle
+slot 0 0343
+p 000001 0.0000
+p 000002 0.6766
+p 020001 0.3746
+p 020004 0.3262
+p 020006 0.6834
+p 020014 0.6667
+p 030002 0.0988
+p 080000 0.2059
+p 080001 0.6433
+p 080002 0.5375

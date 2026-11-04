@@ -1,0 +1,14 @@
+mangle-preset 1
+name Spectral Wash Low Tom
+category FX
+author Mangle
+slot 0 0993
+p 000002 0.6703
+p 020014 1.0000
+p 020001 0.2942
+p 020006 0.6098
+p 02000a 0.5181
+p 080000 0.2059
+p 080001 0.6246
+p 080002 0.5375
+p 030002 0.1322

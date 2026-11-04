@@ -1,0 +1,524 @@
+0500	Wine Glass Sustain	glass	VCSL	Idiophones/Friction Idiophones/Wine Glasses/Sustains/Slow/glass4_D5_Slow_2_Main.wav	74
+0501	Kalimba Kenya	plucked	VCSL	Idiophones/Plucked Idiophones/Kalimba, Kenya/Mbira6_Normal_MainSpirit_A4_k1_vl3_rr2.wav	69
+0502	Concert Harp	strings	VCSL	Chordophones/Composite Chordophones/Concert Harp/KSHarp_A2_f1.wav	45
+0503	Harmonica Soft	reeds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-C/Sustains/Soft/Hohner-Special20_Soft_C5.wav	72
+0504	Tenor Sax	reeds	VCSL	Aerophones/Reed Aerophones/Tenor Saxophone/Non-Vibrato/BrettTenor_NV_Main_C3_vl3_rr1.wav	48
+0505	Didgeridoo Drone	drones	VCSL	Aerophones/Lip Aerophones/Didgeridoo/Didgeridoo1_Sus3_Main.wav	-1
+0506	FM Piano	keys	VCSL	Electrophones/TX81Z/FM Piano/FMPiano_C2_vl2.wav	36
+0507	Clavisynth	keys	VCSL	Electrophones/TX81Z/Clavisynth/Clavisynth_E3_vl3.wav	52
+0508	Pipe Organ	keys	VSCO	Keys/Organ/Loud/Rode_Man3Open_28.wav	-1
+0509	Solo Violin Vibrato	strings	VSCO	Strings/Solo Violin/Arco Vib/LLVln_ArcoVib_A3_f.wav	57
+0510	Cello Section Pizzicato	strings	VSCO	Strings/Cello Section/pizzT/pizzT_A2_v1_RR1.wav	45
+0511	Muted Horn	brass	VSCO	Brass/F Horn/mute/MOHorn_mute_D#3_v1_1.wav	51
+0512	Flute Vibrato	winds	VSCO	Woodwinds/Flute/expvib/LDFlute_expvib_A3_v1_1.wav	57
+0513	Marimba Hit	bars	VSCO	Percussion/Marimba/Marimba_hit_Outrigger_G4_loud_01.wav	67
+0514	Glockenspiel	bars	VSCO	Percussion/Glock/glock_medium_C5.wav	72
+0515	Gong Hit	metal	VSCO	VSCO 1 Percussion/varMetal/Gong/gong_hit_f.wav	-1
+0516	Ball Whistle Main BallWhistle Long-001	winds	VCSL	Aerophones/Edge-blown Aerophones/Ball Whistle/Main_BallWhistle_Long-001.wav	-1
+0517	mute MOHorn mute A#1 v1 1	brass	VSCO	Brass/F Horn/mute/MOHorn_mute_A#1_v1_1.wav	34
+0518	SusVib AltRecorder SusVib A#3 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Alto Recorder/SusVib/AltRecorder_SusVib_A#3_rr1_Main.wav	58
+0519	stac MOHorn stac A#1 v1 rr1	brass	VSCO	Brass/F Horn/stac/MOHorn_stac_A#1_v1_rr1.wav	34
+0520	Sustain AltRecorder Sus A#3 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Alto Recorder/Sustain/AltRecorder_Sus_A#3_rr1_Main.wav	58
+0521	sus MOHorn sus A#1 v1 1	brass	VSCO	Brass/F Horn/sus/MOHorn_sus_A#1_v1_1.wav	34
+0522	SusVib BassRecorder SusVib A2 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Bass Recorder/SusVib/BassRecorder_SusVib_A2_rr1_Main.wav	45
+0523	Buzz Trombone Buzz A#1 v1 1	brass	VSCO	Brass/OldTrombone/Buzz/Trombone_Buzz_A#1_v1_1.wav	34
+0524	Sustain BassRecorder Sus A#2 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Bass Recorder/Sustain/BassRecorder_Sus_A#2_rr1_Main.wav	46
+0525	Fall Trombone Fall A#1 1	brass	VSCO	Brass/OldTrombone/Fall/Trombone_Fall_A#1_1.wav	34
+0526	Sustain SopRecorder Sus A#4 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Soprano Recorder/Sustain/SopRecorder_Sus_A#4_rr1_Main.wav	70
+0527	Short Trombone Short A#1 v1 2	brass	VSCO	Brass/OldTrombone/Short/Trombone_Short_A#1_v1_2.wav	34
+0528	SusVib TenRecorder SusVib A3 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Tenor Recorder/SusVib/TenRecorder_SusVib_A3_rr1_Main.wav	57
+0529	Sustain Trombone Sustain A#1 v1 1	brass	VSCO	Brass/OldTrombone/Sustain/Trombone_Sustain_A#1_v1_1.wav	34
+0530	Sustain TenRecorder Sus A#3 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Tenor Recorder/Sustain/TenRecorder_Sus_A#3_rr1_Main.wav	58
+0531	Vibrato Trombone Vibrato A#1 v1 1	brass	VSCO	Brass/OldTrombone/Vibrato/Trombone_Vibrato_A#1_v1_1.wav	34
+0532	Sustain ocarina A#4 sustain0	winds	VCSL	Aerophones/Edge-blown Aerophones/Ocarina, Small/Sustain/ocarina_A#4_sustain0.wav	70
+0533	stac tenortbn stac A#0 v1 rr1	brass	VSCO	Brass/Tenor Trombone/stac/tenortbn_stac_A#0_v1_rr1.wav	22
+0534	Sus StdOcarina Sus A#4	winds	VCSL	Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/Sus/StdOcarina_Sus_A#4.wav	70
+0535	sus tenortbn sus A#0 v1 1	brass	VSCO	Brass/Tenor Trombone/sus/tenortbn_sus_A#0_v1_1.wav	22
+0536	SusVib StdOcarina SusVib A#4	winds	VCSL	Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/SusVib/StdOcarina_SusVib_A#4.wav	70
+0537	vib tenortbn vib A#1 v1 1	brass	VSCO	Brass/Tenor Trombone/vib/tenortbn_vib_A#1_v1_1.wav	34
+0538	Loud Rode Man3Open A1	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Loud/Rode_Man3Open_A1.wav	33
+0539	harmonM-sus Sum SHTrumpet harmonM-sus A#2 v1 rr1	brass	VSCO	Brass/Trumpet/harmonM-sus/Sum_SHTrumpet_harmonM-sus_A#2_v1_rr1.wav	46
+0540	Loud Pedal Rode Pedal A1	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Loud Pedal/Rode_Pedal_A1.wav	33
+0541	stac Sum SHTrumpet stac A#3 v1 rr1	brass	VSCO	Brass/Trumpet/stac/Sum_SHTrumpet_stac_A#3_v1_rr1.wav	58
+0542	Quiet NT5 Man3Quiet A1 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_A1_rr1.wav	33
+0543	straightM-sus Sum SHTrumpet straightM-sus A#2 v1 rr1	brass	VSCO	Brass/Trumpet/straightM-sus/Sum_SHTrumpet_straightM-sus_A#2_v1_rr1.wav	46
+0544	Quiet Pedal NT5 PedalQuiet A1 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet Pedal/NT5_PedalQuiet_A1_rr1.wav	33
+0545	sus Sum SHTrumpet sus A#3 v1 rr1	brass	VSCO	Brass/Trumpet/sus/Sum_SHTrumpet_sus_A#3_v1_rr1.wav	58
+0546	4' RenOrgan 4foot Room A#1 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Renaissance Organ/4'/RenOrgan_4foot_Room_A#1_rr1.wav	34
+0547	susvib Sum SHTrumpet susvib A#3 v1 rr1	brass	VSCO	Brass/Trumpet/susvib/Sum_SHTrumpet_susvib_A#3_v1_rr1.wav	58
+0548	8' RenOrgan 8foot Room A#1 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_A#1_rr1.wav	34
+0549	stac Tuba3 stac A#0 v1 rr3 Sum	brass	VSCO	Brass/Tuba/stac/Tuba3_stac_A#0_v1_rr3_Sum.wav	22
+0550	Full RenOrgan Full Room A#1 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Renaissance Organ/Full/RenOrgan_Full_Room_A#1_rr1.wav	34
+0551	sus Tuba3 sus A#0 v1 rr1 Mid	brass	VSCO	Brass/Tuba/sus/Tuba3_sus_A#0_v1_rr1_Mid.wav	22
+0552	Train Whistle, Toy Main TrainLow Double-001	winds	VCSL	Aerophones/Edge-blown Aerophones/Train Whistle, Toy/Main_TrainLow_Double-001.wav	-1
+0553	Loud Rode Man3Open 01	keys	VSCO	Keys/Organ/Loud/Rode_Man3Open_01.wav	-1
+0554	Normal Hohner-Special20 Normal C3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-C/Sustains/Normal/Hohner-Special20_Normal_C3.wav	48
+0555	Quiet NT5 Man3Quiet 122 rr1	keys	VSCO	Keys/Organ/Quiet/NT5_Man3Quiet_122_rr1.wav	-1
+0556	Soft Hohner-Special20 Soft C3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-C/Sustains/Soft/Hohner-Special20_Soft_C3.wav	48
+0557	Upright Nr1 UR1 C1 f RR1	keys	VSCO	Keys/Upright Nr1/UR1_C1_f_RR1.wav	24
+0558	Vib Hohner-Special20 Vib C3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-C/Sustains/Vib/Hohner-Special20_Vib_C3.wav	48
+0559	Upright Piano Player dyn1 rr1 000	keys	VSCO	Keys/Upright Piano/Player_dyn1_rr1_000.wav	-1
+0560	Accented Hohner-Special20-F Accented A3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-F/Sustains/Accented/Hohner-Special20-F_Accented_A3.wav	57
+0561	Misc 1 alien1	misc	VSCO	Miscellania Raw/Misc 1/alien1.wav	-1
+0562	HandVib Hohner-Special20-F HandVib A3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-F/Sustains/HandVib/Hohner-Special20-F_HandVib_A3.wav	57
+0563	Misc 2 rtomtom frame	percussion	VSCO	Miscellania Raw/Misc 2/rtomtom_frame.wav	-1
+0564	Normal Hohner-Special20-F Normal A3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-F/Sustains/Normal/Hohner-Special20-F_Normal_A3.wav	57
+0565	NepaleseBells fx1 short r01 main	bells	VSCO	Miscellania Raw/Misc 2/NepaleseBells/fx1_short_r01_main.wav	-1
+0566	Vib Hohner-Special20-F Vib A3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-F/Sustains/Vib/Hohner-Special20-F_Vib_A3.wav	57
+0567	glock glisses glock fx down chromatic fast 01	bells	VSCO	Miscellania Raw/Misc 2/glock_glisses/glock_fx_down_chromatic_fast_01.wav	-1
+0568	Accented Hohner-Super64 Accented C2	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Super64/Sustains/Accented/Hohner-Super64_Accented_C2.wav	36
+0569	Percussion Anvil Hit1 v1 Sum	percussion	VSCO	Percussion/Anvil_Hit1_v1_Sum.wav	-1
+0570	Normal Hohner-Super64 Normal C2	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Super64/Sustains/Normal/Hohner-Super64_Normal _C2.wav	36
+0571	Glock glock medium C6	bells	VSCO	Percussion/Glock/glock_medium_C6.wav	84
+0572	Vib Hohner-Super64 Vib C2	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Super64/Sustains/Vib/Hohner-Super64_Vib_C2.wav	36
+0573	Marimba Marimba hit Outrigger B2 loud 01	percussion	VSCO	Percussion/Marimba/Marimba_hit_Outrigger_B2_loud_01.wav	47
+0574	Siren Main SirenWhistle-002	winds	VCSL	Aerophones/Free Aerophones/Siren/Main_SirenWhistle-002.wav	-1
+0575	Timpani Timpani1 Hit v1 rr1 Sum	percussion	VSCO	Percussion/Timpani/Timpani1_Hit_v1_rr1_Sum.wav	-1
+0576	Didgeridoo Didgeridoo1 BarkDown2 Main	winds	VCSL	Aerophones/Lip Aerophones/Didgeridoo/Didgeridoo1_BarkDown2_Main.wav	-1
+0577	Xylo Xylo Medium C4 ff 01 far	percussion	VSCO	Percussion/Xylo/Xylo_Medium_C4_ff_01_far.wav	60
+0578	Non-Vibrato BrettSaxello SusNV MainSpirit A#2 vl2 rr2	winds	VCSL	Aerophones/Reed Aerophones/Saxello/Non-Vibrato/BrettSaxello_SusNV_MainSpirit_A#2_vl2_rr2.wav	46
+0579	temp Triangle3-HitFM v2 rr2 Sum	percussion	VSCO	Percussion/temp/Triangle3-HitFM_v2_rr2_Sum.wav	-1
+0580	Staccato BrettSaxello Stcts MainSpirit A#2 vl1 rr2	winds	VCSL	Aerophones/Reed Aerophones/Saxello/Staccato/BrettSaxello_Stcts_MainSpirit_A#2_vl1_rr2.wav	46
+0581	pizzT pizzT A2 v1 RR2	strings	VSCO	Strings/Cello Section/pizzT/pizzT_A2_v1_RR2.wav	45
+0582	Vibrato BrettSaxello SusVB MainSpirit A#2 vl2 rr1	winds	VCSL	Aerophones/Reed Aerophones/Saxello/Vibrato/BrettSaxello_SusVB_MainSpirit_A#2_vl2_rr1.wav	46
+0583	spic spic A2 v1 RR1	strings	VSCO	Strings/Cello Section/spic/spic_A2_v1_RR1.wav	45
+0584	Non-Vibrato BrettTenor NV Main A#1 vl2 rr1	winds	VCSL	Aerophones/Reed Aerophones/Tenor Saxophone/Non-Vibrato/BrettTenor_NV_Main_A#1_vl2_rr1.wav	34
+0585	susvib susvib A2 v1 1	strings	VSCO	Strings/Cello Section/susvib/susvib_A2_v1_1.wav	45
+0586	Staccato BrettTenor Staccato Main A#3 vl1 rr3	winds	VCSL	Aerophones/Reed Aerophones/Tenor Saxophone/Staccato/BrettTenor_Staccato_Main_A#3_vl1_rr3.wav	58
+0587	trem trem A2 v1 1	strings	VSCO	Strings/Cello Section/trem/trem_A2_v1_1.wav	45
+0588	Vibrato BrettTenor Vib Main A#1 var2	winds	VCSL	Aerophones/Reed Aerophones/Tenor Saxophone/Vibrato/BrettTenor_Vib_Main_A#1_var2.wav	34
+0589	Harp KSHarp A2 mf	plucked	VSCO	Strings/Harp/KSHarp_A2_mf.wav	45
+0590	Concert Harp KSHarp A2 mf1	plucked	VCSL	Chordophones/Composite Chordophones/Concert Harp/KSHarp_A2_mf1.wav	45
+0591	Pizz BKCtbss Pizz A#0 v1 rr1	strings	VSCO	Strings/Solo Contrabass/Pizz/BKCtbss_Pizz_A#0_v1_rr1.wav	22
+0592	Folk Harp EWHarp Normal A#1 v2 RR1	plucked	VCSL	Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_A#1_v2_RR1.wav	34
+0593	Spic BKCtbss Spic A#0 v1 rr1	strings	VSCO	Strings/Solo Contrabass/Spic/BKCtbss_Spic_A#0_v1_rr1.wav	22
+0594	Finger Strumstick Finger Str1 Main D2 vl1 rr1	strings	VCSL	Chordophones/Composite Chordophones/Strumstick/Finger/Strumstick_Finger_Str1_Main_D2_vl1_rr1.wav	38
+0595	SusNV BKCtbss SusNV A#0 v1 rr1	strings	VSCO	Strings/Solo Contrabass/SusNV/BKCtbss_SusNV_A#0_v1_rr1.wav	22
+0596	FX FX 01	plucked	VCSL	Chordophones/Zithers/Dan Tranh/FX/FX_01.wav	-1
+0597	SusVib BKCtbss SusVib A#0 v1 rr1	strings	VSCO	Strings/Solo Contrabass/SusVib/BKCtbss_SusVib_A#0_v1_rr1.wav	22
+0598	Gliss Gliss Dwn Med ff 1	plucked	VCSL	Chordophones/Zithers/Dan Tranh/Gliss/Gliss_Dwn_Med_ff_1.wav	-1
+0599	Trem BKCtbss Trem B2 v1 rr1	strings	VSCO	Strings/Solo Contrabass/Trem/BKCtbss_Trem_B2_v1_rr1.wav	47
+0600	Normal B1 f 1	plucked	VCSL	Chordophones/Zithers/Dan Tranh/Normal/B1_f_1.wav	35
+0601	Arco Vib LLVln ArcoVib A3 p	strings	VSCO	Strings/Solo Violin/Arco Vib/LLVln_ArcoVib_A3_p.wav	57
+0602	Tremolo B1 Trem 1	plucked	VCSL	Chordophones/Zithers/Dan Tranh/Tremolo/B1_Trem_1.wav	35
+0603	Pizz LLVln Pizz A3 f RR1	strings	VSCO	Strings/Solo Violin/Pizz/LLVln_Pizz_A3_f_RR1.wav	57
+0604	Vibrato B1 vib ff 1	plucked	VCSL	Chordophones/Zithers/Dan Tranh/Vibrato/B1_vib_ff_1.wav	35
+0605	Trem LLVln trem A2 v1 rr1	strings	VSCO	Strings/Solo Violin/Trem/LLVln_trem_A2_v1_rr1.wav	45
+0606	Grand Piano, Kawai - Legacy GrandPno Main Sus A2 v1 rr1	plucked	VCSL	Chordophones/Zithers/Grand Piano, Kawai - Legacy/Sustains/GrandPno_Main_Sus_A2_v1_rr1.wav	45
+0607	spic LLVln spic A2 v1 rr1	strings	VSCO	Strings/Solo Violin/spic/LLVln_spic_A2_v1_rr1.wav	45
+0608	Grand Piano, Kawai GPiano sus A#-1 v2 rr1 Player	plucked	VCSL	Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A#-1_v2_rr1_Player.wav	10
+0609	pizz ViolaEns pizz A3 v1 rr1	strings	VSCO	Strings/Viola Section/pizz/ViolaEns_pizz_A3_v1_rr1.wav	57
+0610	NoSus JHPiano NoSus Close A#0 vl2 rr1	plucked	VCSL	Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_A#0_vl2_rr1.wav	22
+0611	spic Violas spic A3 v1 rr1	strings	VSCO	Strings/Viola Section/spic/Violas_spic_A3_v1_rr1.wav	57
+0612	Sus JHPiano Sus Close A#4 vl2 rr1	plucked	VCSL	Chordophones/Zithers/Grand Piano, Steinway B/Sus/JHPiano_Sus_Close_A#4_vl2_rr1.wav	70
+0613	susvib ViolaEns susvib A3 v1 1	strings	VSCO	Strings/Viola Section/susvib/ViolaEns_susvib_A3_v1_1.wav	57
+0614	Lute ZuckermannKitHarpsi Lute Sus A#0 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, English/Sustains/Lute/ZuckermannKitHarpsi_Lute_Sus_A#0_rr1.wav	22
+0615	trem Violas trem A3 v1 rr1	strings	VSCO	Strings/Viola Section/trem/Violas_trem_A3_v1_rr1.wav	57
+0616	Normal ZuckermannKitHarpsi Normal Sus A#0 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, English/Sustains/Normal/ZuckermannKitHarpsi_Normal_Sus_A#0_rr1.wav	22
+0617	Pizz VlnEns Pizz A2 v1 rr1	strings	VSCO	Strings/Violin Section/Pizz/VlnEns_Pizz_A2_v1_rr1.wav	45
+0618	High HarpsiRH High Far A#1 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, Flemish/Sustains/High/HarpsiRH_High_Far_A#1_rr1.wav	34
+0619	Spic VlnEns Spic A2 v1 rr1	strings	VSCO	Strings/Violin Section/Spic/VlnEns_Spic_A2_v1_rr1.wav	45
+0620	Low HarpsiRH Low Far A#0 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, Flemish/Sustains/Low/HarpsiRH_Low_Far_A#0_rr1.wav	22
+0621	Trem VlnEns Trem A2 v1	strings	VSCO	Strings/Violin Section/Trem/VlnEns_Trem_A2_v1.wav	45
+0622	Harpsichord, French Harpsi2 Normal A#0 rr1 Main	plucked	VCSL	Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_A#0_rr1_Main.wav	22
+0623	susVib VlnEns susVib A2 v1	strings	VSCO	Strings/Violin Section/susVib/VlnEns_susVib_A2_v1.wav	45
+0624	stop1 Harpsichord stop1 A#0 1	plucked	VCSL	Chordophones/Zithers/Harpsichord, Italian/Sustains/stop1/Harpsichord_stop1_A#0_1.wav	22
+0625	bass bdrum2 pp 1	percussion	VSCO	VSCO 1 Percussion/drums/bass/bdrum2_pp_1.wav	-1
+0626	Harpsichord, Unk Harpsi4 Sus Main A#0 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, Unk/Sustains/Harpsi4_Sus_Main_A#0_rr1.wav	22
+0627	Bongos HighBongo1	percussion	VSCO	VSCO 1 Percussion/drums/other/Bongos/HighBongo1.wav	-1
+0628	LongBow BowedPsaltery A#3 Main LongBow rr2	plucked	VCSL	Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_A#3_Main_LongBow_rr2.wav	58
+0629	muted ethnicHigh hit f 1	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/congo/muted/ethnicHigh_hit_f_1.wav	-1
+0630	Pluck BowedPsaltery A#3 Main Pluck rr1	plucked	VCSL	Chordophones/Zithers/Psaltery, Bowed and Plucked/Pluck/BowedPsaltery_A#3_Main_Pluck_rr1.wav	58
+0631	open ethnicHighOpen hit f 1	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/congo/open/ethnicHighOpen_hit_f_1.wav	-1
+0632	Spiccato BowedPsaltery A#3 Main Spic rr1	plucked	VCSL	Chordophones/Zithers/Psaltery, Bowed and Plucked/Spiccato/BowedPsaltery_A#3_Main_Spic_rr1.wav	58
+0633	giant EthnicLargeStick rimshot 2	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/giant/EthnicLargeStick_rimshot_2.wav	-1
+0634	Off Player PedOff 000	plucked	VCSL	Chordophones/Zithers/Upright Piano, Knight/Pedal/Off/Player_PedOff_000.wav	-1
+0635	hand EthnicLargeHand brush 1	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_brush_1.wav	-1
+0636	On Player PedOn 000	plucked	VCSL	Chordophones/Zithers/Upright Piano, Knight/Pedal/On/Player_PedOn_000.wav	-1
+0637	mallet EthnicLargeMallet hit f 1	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/giant/mallet/EthnicLargeMallet_hit_f_1.wav	-1
+0638	Upright Piano, Knight Player vl1 rr1 A-1	plucked	VCSL	Chordophones/Zithers/Upright Piano, Knight/Sustains/Player_vl1_rr1_A-1.wav	9
+0639	sticks EthnicLargeSticks hit f 1	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/giant/sticks/EthnicLargeSticks_hit_f_1.wav	-1
+0640	Upright Piano, Yamaha Upright1 Sus C0 vl1 rr1	plucked	VCSL	Chordophones/Zithers/Upright Piano, Yamaha/Sustains/Upright1_Sus_C0_vl1_rr1.wav	12
+0641	drum1 snare1 f 1	percussion	VSCO	VSCO 1 Percussion/drums/snare/drum1/snare1_f_1.wav	-1
+0642	Clavisynth Clavisynth C0 vl1	synth	VCSL	Electrophones/TX81Z/Clavisynth/Clavisynth_C0_vl1.wav	12
+0643	drum2 snare2 f 1	percussion	VSCO	VSCO 1 Percussion/drums/snare/drum2/snare2_f_1.wav	-1
+0644	FM Piano FMPiano C0 vl1	synth	VCSL	Electrophones/TX81Z/FM Piano/FMPiano_C0_vl1.wav	12
+0645	drum3 marching snare3 f 2	percussion	VSCO	VSCO 1 Percussion/drums/snare/drum3_marching/snare3_f_2.wav	-1
+0646	Piano 1 Piano 1 C0 vl1	synth	VCSL	Electrophones/TX81Z/Piano 1/Piano 1_C0_vl1.wav	12
+0647	tenor higher tenorH f 1	percussion	VSCO	VSCO 1 Percussion/drums/tenor/tenor_higher/tenorH_f_1.wav	-1
+0648	Fast glass2 F#4 Fast 1 Main	percussion	VCSL	Idiophones/Friction Idiophones/Wine Glasses/Sustains/Fast/glass2_F#4_Fast_1_Main.wav	66
+0649	tenor lower tenor f 1	percussion	VSCO	VSCO 1 Percussion/drums/tenor/tenor_lower/tenor_f_1.wav	-1
+0650	Slow glass2 F#4 Slow 1 Main	percussion	VCSL	Idiophones/Friction Idiophones/Wine Glasses/Sustains/Slow/glass2_F#4_Slow_1_Main.wav	66
+0651	clash crash hit ff loose	metal	VSCO	VSCO 1 Percussion/varMetal/Cymbals/clash/crash_hit_ff_loose.wav	-1
+0652	Kalimba, Kenya Mbira6 Normal MainSpirit B2 k8 vl3 rr2	plucked	VCSL	Idiophones/Plucked Idiophones/Kalimba, Kenya/Mbira6_Normal_MainSpirit_B2_k8_vl3_rr2.wav	47
+0653	susp susp hit hardmall f	metal	VSCO	VSCO 1 Percussion/varMetal/Cymbals/susp/susp_hit_hardmall_f.wav	-1
+0654	Kalimba, Tanzania MBira3 pluck Main A#2 k8 50 100 rr2	plucked	VCSL	Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_A#2_k8_50_100_rr2.wav	46
+0655	Gong gong hit fff	metal	VSCO	VSCO 1 Percussion/varMetal/Gong/gong_hit_fff.wav	-1
+0656	Mbira Mavembe (Gandanga), Zimbabwe, Low G Mbira5 Normal Main	plucked	VCSL	Idiophones/Plucked Idiophones/Mbira Mavembe (Gandanga), Zimbabwe, Low G/Mbira5_Normal_MainSpirit_A#1_k12_vl2_rr1.wav	34
+0657	1 triangle1 hit mf pt2	percussion	VSCO	VSCO 1 Percussion/varMetal/triangle/1/triangle1_hit_mf_pt2.wav	-1
+0658	Mbira dzaVadzimu Nyamaropa, Zimbabwe, Low B MBira4 pluck Mai	plucked	VCSL	Idiophones/Plucked Idiophones/Mbira dzaVadzimu Nyamaropa, Zimbabwe, Low B/MBira4_pluck_Main_A#1_14_50_100_rr1.wav	34
+0659	2 triangle2 hit mp	percussion	VSCO	VSCO 1 Percussion/varMetal/triangle/2/triangle2_hit_mp.wav	-1
+0660	Nyunga Nyunga, Mozambique, Low F Mbira2 Normal MainSpirit A#	plucked	VCSL	Idiophones/Plucked Idiophones/Nyunga Nyunga, Mozambique, Low F/Mbira2_Normal_MainSpirit_A#2_k13_vl3_rr2.wav	46
+0661	3 triangle3 hit mf	percussion	VSCO	VSCO 1 Percussion/varMetal/triangle/3/triangle3_hit_mf.wav	-1
+0662	Agogo Bells Agogo High v1 rr1 Mid	bells	VCSL	Idiophones/Struck Idiophones/Agogo Bells/Agogo_High_v1_rr1_Mid.wav	-1
+0663	4 triangle4 hit mf	percussion	VSCO	VSCO 1 Percussion/varMetal/triangle/4/triangle4_hit_mf.wav	-1
+0664	Legacy agogoBell2 mf 1	bells	VCSL	Idiophones/Struck Idiophones/Agogo Bells/Legacy/agogoBell2_mf_1.wav	-1
+0665	various Fing Cymb	percussion	VSCO	VSCO 1 Percussion/varMetal/various/Fing_Cymb.wav	-1
+0666	Anvil Anvil Hit1 v1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Anvil/Anvil_Hit1_v1_rr1_Mid.wav	-1
+0667	varWood claves ff	percussion	VSCO	VSCO 1 Percussion/varWood/claves_ff.wav	-1
+0668	Hard Mallet EthnicXylo hardM C#3 vl1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Balafon/Hard Mallet/EthnicXylo_hardM_C#3_vl1_rr1_Mid.wav	49
+0669	sus PSBassoon A#0 v1 1	winds	VSCO	Woodwinds/Bassoon/sus/PSBassoon_A#0_v1_1.wav	22
+0670	Soft Mallet EthnicXylo softM C#3 vl1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Balafon/Soft Mallet/EthnicXylo_softM_C#3_vl1_rr1_Mid.wav	49
+0671	vib PSBassoon A1 v1 1	winds	VSCO	Woodwinds/Bassoon/vib/PSBassoon_A1_v1_1.wav	33
+0672	Traditional Mallet EthnicXylo tradM C#3 vl1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Balafon/Traditional Mallet/EthnicXylo_tradM_C#3_vl1_rr1_Mid.wav	49
+0673	susLong DCClar susLong A#2 v1 rr1 sum	winds	VSCO	Woodwinds/Clarinet/susLong/DCClar_susLong_A#2_v1_rr1_sum.wav	46
+0674	Individual BellTree Hit A#5 rr1 Mid	bells	VCSL	Idiophones/Struck Idiophones/Bell Tree/Individual/BellTree_Hit_A#5_rr1_Mid.wav	82
+0675	expvib LDFlute expvib A4 v1 1	winds	VSCO	Woodwinds/Flute/expvib/LDFlute_expvib_A4_v1_1.wav	69
+0676	Stroke BellTree Stroke 10 Mid	bells	VCSL	Idiophones/Struck Idiophones/Bell Tree/Stroke/BellTree_Stroke_10_Mid.wav	-1
+0677	stac LDFlute stac A3 v1 rr1	winds	VSCO	Woodwinds/Flute/stac/LDFlute_stac_A3_v1_rr1.wav	57
+0678	Brake Drum BrakeDrum1 Bowed rr2 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Brake Drum/BrakeDrum1_Bowed_rr2_Mid.wav	-1
+0679	susNV LDFlute susNV A3 v1 1	winds	VSCO	Woodwinds/Flute/susNV/LDFlute_susNV_A3_v1_1.wav	57
+0680	Cabasa Cabasa1 Hit rr2 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Cabasa/Cabasa1_Hit_rr2_Mid.wav	-1
+0681	susvib LDFlute susvib A3 v1 1	winds	VSCO	Woodwinds/Flute/susvib/LDFlute_susvib_A3_v1_1.wav	57
+0682	Cajon Cajon hit1 f rr1	percussion	VCSL	Idiophones/Struck Idiophones/Cajon/Cajon_hit1_f_rr1.wav	-1
+0683	Stacc Oboe Stacc A#2 v1 rr1 Main	winds	VSCO	Woodwinds/Oboe/Stacc/Oboe_Stacc_A#2_v1_rr1_Main.wav	46
+0684	Claps SoloClap vl3	percussion	VCSL	Idiophones/Struck Idiophones/Claps/SoloClap_vl3.wav	-1
+0685	Sus Oboe Sus A#2 v1 Main	winds	VSCO	Woodwinds/Oboe/Sus/Oboe_Sus_A#2_v1_Main.wav	46
+0686	Clash Cymbals 1 cymbal crash1 ff2	metal	VCSL	Idiophones/Struck Idiophones/Clash Cymbals 1/cymbal_crash1_ff2.wav	-1
+0687	Vib Oboe Vib A#2 v1 Main	winds	VSCO	Woodwinds/Oboe/Vib/Oboe_Vib_A#2_v1_Main.wav	46
+0688	Clash Cymbals 2 cymbal crash2 f1	metal	VCSL	Idiophones/Struck Idiophones/Clash Cymbals 2/cymbal_crash2_f1.wav	-1
+0689	Sus piccolo C5 sustain1	winds	VSCO	Woodwinds/Piccolo/Sus/piccolo_C5_sustain1.wav	72
+0690	Claves Claves1 Hit v1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Claves/Claves1_Hit_v1_rr1_Mid.wav	-1
+0691	Legacy claves ff	percussion	VCSL	Idiophones/Struck Idiophones/Claves/Legacy/claves_ff.wav	-1
+0692	Cowbells Cowbell1 Hit v2 rr1 Mid	bells	VCSL	Idiophones/Struck Idiophones/Cowbells/Cowbell1_Hit_v2_rr1_Mid.wav	-1
+0693	Finger Cymbals Fing Cymb	metal	VCSL	Idiophones/Struck Idiophones/Finger Cymbals/Fing_Cymb.wav	-1
+0694	Flexatone flexatone1	percussion	VCSL	Idiophones/Struck Idiophones/Flexatone/flexatone1.wav	-1
+0695	Glockenspiel glock loud C5 01	bells	VCSL	Idiophones/Struck Idiophones/Glockenspiel/glock_loud_C5_01.wav	72
+0696	Gong 1 gong 2 f	metal	VCSL	Idiophones/Struck Idiophones/Gong 1/gong_2_f.wav	-1
+0697	Guiro Guiro Fast rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Guiro/Guiro_Fast_rr1_Mid.wav	-1
+0698	Legacy guiro long	percussion	VCSL	Idiophones/Struck Idiophones/Guiro/Legacy/guiro_long.wav	-1
+0699	Hand Bells, Nepalese HB 1	bells	VCSL	Idiophones/Struck Idiophones/Hand Bells, Nepalese/HB_1.wav	-1
+0700	Hand Chimes sus A#3 r01 main	bells	VCSL	Idiophones/Struck Idiophones/Hand Chimes/sus_A#3_r01_main.wav	58
+0701	Hi-Hat Cymbal HiHat Close rr1 Mid	metal	VCSL	Idiophones/Struck Idiophones/Hi-Hat Cymbal/HiHat_Close_rr1_Mid.wav	-1
+0702	Marimba Marimba hit Outrigger B2 loud 01	percussion	VCSL	Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_B2_loud_01.wav	47
+0703	Legacy windchimes asc1	bells	VCSL	Idiophones/Struck Idiophones/Mark Trees/Legacy/windchimes_asc1.wav	-1
+0704	Ratchet Ratchet1 Crank rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Ratchet/Ratchet1_Crank_rr1_Mid.wav	-1
+0705	Shaker, Large LShaker Hit rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Shaker, Large/LShaker_Hit_rr1_Mid.wav	-1
+0706	Slapstick slapstick rr1	percussion	VCSL	Idiophones/Struck Idiophones/Slapstick/slapstick_rr1.wav	-1
+0707	Sleigh Bells Sleighbells Hit rr1 Mid	bells	VCSL	Idiophones/Struck Idiophones/Sleigh Bells/Sleighbells_Hit_rr1_Mid.wav	-1
+0708	Slit Drum LogDrumHi MedM v1 rr1 Sum	percussion	VCSL	Idiophones/Struck Idiophones/Slit Drum/LogDrumHi_MedM_v1_rr1_Sum.wav	-1
+0709	Suspended Cymbal 1 susCymb1 bow 13	metal	VCSL	Idiophones/Struck Idiophones/Suspended Cymbal 1/susCymb1_bow_13.wav	-1
+0710	Suspended Cymbal 2 susCymb2 bowed 2	metal	VCSL	Idiophones/Struck Idiophones/Suspended Cymbal 2/susCymb2_bowed_2.wav	-1
+0711	Tambourine 1 Tamb1 Hit v1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Tambourine 1/Tamb1_Hit_v1_rr1_Mid.wav	-1
+0712	Tambourine 2 Tamb2 Hit v1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Tambourine 2/Tamb2_Hit_v1_rr1_Mid.wav	-1
+0713	Tambourine 3 - Legacy tambourine down rr1	percussion	VCSL	Idiophones/Struck Idiophones/Tambourine 3 - Legacy/tambourine_down_rr1.wav	-1
+0714	Tambourine 4 - Legacy tamb2 rr1	percussion	VCSL	Idiophones/Struck Idiophones/Tambourine 4 - Legacy/tamb2_rr1.wav	-1
+0715	Triangles Triangle1 HitFM v1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Triangle1_HitFM_v1_rr1_Mid.wav	-1
+0716	1 triangle1 hit mf pt2	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Legacy/1/triangle1_hit_mf_pt2.wav	-1
+0717	2 triangle2 hit mp	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Legacy/2/triangle2_hit_mp.wav	-1
+0718	3 triangle3 hit mf	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Legacy/3/triangle3_hit_mf.wav	-1
+0719	4 triangle4 hit mf	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Legacy/4/triangle4_hit_mf.wav	-1
+0720	Tubular Bells 1 chimes A#3 ff rr1	bells	VCSL	Idiophones/Struck Idiophones/Tubular Bells 1/chimes_A#3_ff_rr1.wav	58
+0721	Tubular Bells 2 TB hit A4 v2 1	bells	VCSL	Idiophones/Struck Idiophones/Tubular Bells 2/TB_hit_A4_v2_1.wav	69
+0722	Tubular Glockenspiel A0 loud1	bells	VCSL	Idiophones/Struck Idiophones/Tubular Glockenspiel/A0_loud1.wav	21
+0723	Bowed Vibes bowed A2 rr1 Main	percussion	VCSL	Idiophones/Struck Idiophones/Vibraphone/Bowed/Vibes_bowed_A2_rr1_Main.wav	45
+0724	Hard Mallets Vibes hard A2 v2 rr1 Main	percussion	VCSL	Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_A2_v2_rr1_Main.wav	45
+0725	Soft Mallets Vibes soft A2 v1 rr1 Main	percussion	VCSL	Idiophones/Struck Idiophones/Vibraphone/Soft Mallets/Vibes_soft_A2_v1_rr1_Main.wav	45
+0726	Legacy vibraslap rr1	percussion	VCSL	Idiophones/Struck Idiophones/Vibraslap/Legacy/vibraslap_rr1.wav	-1
+0727	Woodblock wood click2 mp	percussion	VCSL	Idiophones/Struck Idiophones/Woodblock/wood_click2_mp.wav	-1
+0728	Hard Mallets Xylo Hard C4 ff 01 far	percussion	VCSL	Idiophones/Struck Idiophones/Xylophone/Hard Mallets/Xylo_Hard_C4_ff_01_far.wav	60
+0729	Medium Mallets Xylo Medium C4 ff 01 far	percussion	VCSL	Idiophones/Struck Idiophones/Xylophone/Medium Mallets/Xylo_Medium_C4_ff_01_far.wav	60
+0730	Soft Mallets Xylo Soft C4 ff 01 far	percussion	VCSL	Idiophones/Struck Idiophones/Xylophone/Soft Mallets/Xylo_Soft_C4_ff_01_far.wav	60
+0731	Ocean Drum OceanDrum Sus 2 Mid	drums	VCSL	Membranophones/Other Membranophones/Ocean Drum/OceanDrum_Sus_2_Mid.wav	-1
+0732	Bass Drum 1 BDrumNew hit v2 rr1 Sum	drums	VCSL	Membranophones/Struck Membranophones/Bass Drum 1/BDrumNew_hit_v2_rr1_Sum.wav	-1
+0733	Bass Drum 2 bassdrum cresc med	drums	VCSL	Membranophones/Struck Membranophones/Bass Drum 2/bassdrum_cresc_med.wav	-1
+0734	Bass Drum 3 - Legacy bdrum2 pp rr1	drums	VCSL	Membranophones/Struck Membranophones/Bass Drum 3 - Legacy/bdrum2_pp_rr1.wav	-1
+0735	Bongos BongoH Hit1 v1 rr2 Mid	drums	VCSL	Membranophones/Struck Membranophones/Bongos/BongoH_Hit1_v1_rr2_Mid.wav	-1
+0736	Conga Conga HitFM v2 rr1 Sum	drums	VCSL	Membranophones/Struck Membranophones/Conga/Conga_HitFM_v2_rr1_Sum.wav	-1
+0737	Darbuka Darbuka 1 hit vl1 rr1	drums	VCSL	Membranophones/Struck Membranophones/Darbuka/Darbuka_1_hit_vl1_rr1.wav	-1
+0738	Frame Drum HDrumL Hand rr1 Sum	drums	VCSL	Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hand_rr1_Sum.wav	-1
+0739	drum1 snare1 f rr1	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Snares/drum1/snare1_f_rr1.wav	-1
+0740	drum2 snare2 f rr1	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Snares/drum2/snare2_f_rr1.wav	-1
+0741	drum3 marching snare3 f rr2	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Snares/drum3_marching/snare3_f_rr2.wav	-1
+0742	tenor higher tenorH f rr1	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Toms/tenor_higher/tenorH_f_rr1.wav	-1
+0743	tenor lower tenor f rr1	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Toms/tenor_lower/tenor_f_rr1.wav	-1
+0744	Snare Drum, Modern 1 Snare2 HitNS v2 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Modern 1/Snare2_HitNS_v2_rr1_Mid.wav	-1
+0745	Snare Drum, Modern 2 Snare3M HitNS v4 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Modern 2/Snare3M_HitNS_v4_rr1_Mid.wav	-1
+0746	Snare Drum, Modern 3 Snare4 HitSN v4 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Modern 3/Snare4_HitSN_v4_rr1_Mid.wav	-1
+0747	Snare Drum, Rope Tension RopeSnare sidestick Main vl2 rr1	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Rope Tension/RopeSnare_sidestick_Main_vl2_rr1.wav	-1
+0748	Hi RopeSnare hi sn Main vl1 rr1	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Rope Tension/Hi/RopeSnare_hi_sn_Main_vl1_rr1.wav	-1
+0749	Low RopeSnare low ns Main vl1 rr2	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Rope Tension/Low/RopeSnare_low_ns_Main_vl1_rr2.wav	-1
+0750	Hit Timpani1 Hit v2 rr1 Sum	drums	VCSL	Membranophones/Struck Membranophones/Timpani 1/Hit/Timpani1_Hit_v2_rr1_Sum.wav	-1
+0751	Hit Timpani1A hit v2 rr1 main	drums	VCSL	Membranophones/Struck Membranophones/Timpani 2/Hit/Timpani1A_hit_v2_rr1_main.wav	-1
+0752	Tom 1 TomH rimFLS rr2 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 1/TomH_rimFLS_rr2_Mid.wav	-1
+0753	Mallet TomH HitM v2 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 1/Mallet/TomH_HitM_v2_rr1_Mid.wav	-1
+0754	Stick TomH HitS v2 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 1/Stick/TomH_HitS_v2_rr1_Mid.wav	-1
+0755	Tom 2 TomL rimFLS rr2 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 2/TomL_rimFLS_rr2_Mid.wav	-1
+0756	Mallet TomL HitM v2 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 2/Mallet/TomL_HitM_v2_rr1_Mid.wav	-1
+0757	Stick TomL HitS v2 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 2/Stick/TomL_HitS_v2_rr1_Mid.wav	-1
+0758	Ball Whistle Main BallWhistle Short-001	winds	VCSL	Aerophones/Edge-blown Aerophones/Ball Whistle/Main_BallWhistle_Short-001.wav	-1
+0759	mute MOHorn mute D#2 v2 1	brass	VSCO	Brass/F Horn/mute/MOHorn_mute_D#2_v2_1.wav	39
+0760	SusVib AltRecorder SusVib E4 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Alto Recorder/SusVib/AltRecorder_SusVib_E4_rr1_Main.wav	64
+0761	stac MOHorn stac D2 v1 rr1	brass	VSCO	Brass/F Horn/stac/MOHorn_stac_D2_v1_rr1.wav	38
+0762	Sustain AltRecorder Sus E4 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Alto Recorder/Sustain/AltRecorder_Sus_E4_rr1_Main.wav	64
+0763	sus MOHorn sus D#1 v1 1	brass	VSCO	Brass/F Horn/sus/MOHorn_sus_D#1_v1_1.wav	27
+0764	SusVib BassRecorder SusVib D3 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Bass Recorder/SusVib/BassRecorder_SusVib_D3_rr1_Main.wav	50
+0765	Buzz Trombone Buzz D#2 v1 1	brass	VSCO	Brass/OldTrombone/Buzz/Trombone_Buzz_D#2_v1_1.wav	39
+0766	Sustain BassRecorder Sus E3 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Bass Recorder/Sustain/BassRecorder_Sus_E3_rr1_Main.wav	52
+0767	Fall Trombone Fall D#2 2	brass	VSCO	Brass/OldTrombone/Fall/Trombone_Fall_D#2_2.wav	39
+0768	Sustain SopRecorder Sus D5 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Soprano Recorder/Sustain/SopRecorder_Sus_D5_rr1_Main.wav	74
+0769	Short Trombone Short D2 v1 1	brass	VSCO	Brass/OldTrombone/Short/Trombone_Short_D2_v1_1.wav	38
+0770	SusVib TenRecorder SusVib D3 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Tenor Recorder/SusVib/TenRecorder_SusVib_D3_rr1_Main.wav	50
+0771	Sustain Trombone Sustain D#3 v4 1	brass	VSCO	Brass/OldTrombone/Sustain/Trombone_Sustain_D#3_v4_1.wav	51
+0772	Sustain TenRecorder Sus D4 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Tenor Recorder/Sustain/TenRecorder_Sus_D4_rr1_Main.wav	62
+0773	Vibrato Trombone Vibrato C3 v1 1	brass	VSCO	Brass/OldTrombone/Vibrato/Trombone_Vibrato_C3_v1_1.wav	48
+0774	Sustain ocarina C5 sustain0	winds	VCSL	Aerophones/Edge-blown Aerophones/Ocarina, Small/Sustain/ocarina_C5_sustain0.wav	72
+0775	stac tenortbn stac D3 v3 rr1	brass	VSCO	Brass/Tenor Trombone/stac/tenortbn_stac_D3_v3_rr1.wav	50
+0776	Sus StdOcarina Sus C#5	winds	VCSL	Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/Sus/StdOcarina_Sus_C#5.wav	73
+0777	sus tenortbn sus D#1 v3 1	brass	VSCO	Brass/Tenor Trombone/sus/tenortbn_sus_D#1_v3_1.wav	27
+0778	SusVib StdOcarina SusVib C4	winds	VCSL	Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/SusVib/StdOcarina_SusVib_C4.wav	60
+0779	vib tenortbn vib D3 v1 1	brass	VSCO	Brass/Tenor Trombone/vib/tenortbn_vib_D3_v1_1.wav	50
+0780	Loud Rode Man3Open C6	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Loud/Rode_Man3Open_C6.wav	84
+0781	harmonM-sus Sum SHTrumpet harmonM-sus D#3 v1 rr1	brass	VSCO	Brass/Trumpet/harmonM-sus/Sum_SHTrumpet_harmonM-sus_D#3_v1_rr1.wav	51
+0782	Loud Pedal Rode Pedal D#1	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Loud Pedal/Rode_Pedal_D#1.wav	27
+0783	stac Sum SHTrumpet stac D#3 v2 rr2	brass	VSCO	Brass/Trumpet/stac/Sum_SHTrumpet_stac_D#3_v2_rr2.wav	51
+0784	Quiet NT5 Man3Quiet C6 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C6_rr1.wav	84
+0785	straightM-sus Sum SHTrumpet straightM-sus D3 v1 rr1	brass	VSCO	Brass/Trumpet/straightM-sus/Sum_SHTrumpet_straightM-sus_D3_v1_rr1.wav	50
+0786	Quiet Pedal NT5 PedalQuiet D#1 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet Pedal/NT5_PedalQuiet_D#1_rr1.wav	27
+0787	sus Sum SHTrumpet sus D#3 v1 rr1	brass	VSCO	Brass/Trumpet/sus/Sum_SHTrumpet_sus_D#3_v1_rr1.wav	51
+0788	4' RenOrgan 4foot Room D5 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Renaissance Organ/4'/RenOrgan_4foot_Room_D5_rr1.wav	74
+0789	susvib Sum SHTrumpet susvib D#3 v1 rr1	brass	VSCO	Brass/Trumpet/susvib/Sum_SHTrumpet_susvib_D#3_v1_rr1.wav	51
+0790	8' RenOrgan 8foot Room D5 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_D5_rr1.wav	74
+0791	stac Tuba3 stac D2 v1 rr4 Sum	brass	VSCO	Brass/Tuba/stac/Tuba3_stac_D2_v1_rr4_Sum.wav	38
+0792	Full RenOrgan Full Room D5 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Renaissance Organ/Full/RenOrgan_Full_Room_D5_rr1.wav	74
+0793	sus Tuba3 sus D#1 v3 rr1 Mid	brass	VSCO	Brass/Tuba/sus/Tuba3_sus_D#1_v3_rr1_Mid.wav	27
+0794	Train Whistle, Toy Main TrainLow Med-001	winds	VCSL	Aerophones/Edge-blown Aerophones/Train Whistle, Toy/Main_TrainLow_Med-001.wav	-1
+0795	Loud Rode Man3Open 49	keys	VSCO	Keys/Organ/Loud/Rode_Man3Open_49.wav	-1
+0796	Normal Hohner-Special20 Normal E3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-C/Sustains/Normal/Hohner-Special20_Normal_E3.wav	52
+0797	Quiet NT5 Man3Quiet 170 rr1	keys	VSCO	Keys/Organ/Quiet/NT5_Man3Quiet_170_rr1.wav	-1
+0798	Soft Hohner-Special20 Soft E4	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-C/Sustains/Soft/Hohner-Special20_Soft_E4.wav	64
+0799	Upright Nr1 UR1 C7 pp RR2	keys	VSCO	Keys/Upright Nr1/UR1_C7_pp_RR2.wav	96
+0800	Vib Hohner-Special20 Vib E3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-C/Sustains/Vib/Hohner-Special20_Vib_E3.wav	52
+0801	Upright Piano Player dyn2 rr1 020	keys	VSCO	Keys/Upright Piano/Player_dyn2_rr1_020.wav	-1
+0802	Accented Hohner-Special20-F Accented C5	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-F/Sustains/Accented/Hohner-Special20-F_Accented_C5.wav	72
+0803	Misc 1 metal hit8	misc	VSCO	Miscellania Raw/Misc 1/metal_hit8.wav	-1
+0804	HandVib Hohner-Special20-F HandVib C5	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-F/Sustains/HandVib/Hohner-Special20-F_HandVib_C5.wav	72
+0805	Misc 2 sleighbell1 hit quiet	bells	VSCO	Miscellania Raw/Misc 2/sleighbell1_hit_quiet.wav	-1
+0806	Normal Hohner-Special20-F Normal C6	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-F/Sustains/Normal/Hohner-Special20-F_Normal_C6.wav	84
+0807	NepaleseBells fx2 short r02 main	bells	VSCO	Miscellania Raw/Misc 2/NepaleseBells/fx2_short_r02_main.wav	-1
+0808	Vib Hohner-Special20-F Vib C5	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Special20-F/Sustains/Vib/Hohner-Special20-F_Vib_C5.wav	72
+0809	glock glisses glock fx up chromatic fast 01	bells	VSCO	Miscellania Raw/Misc 2/glock_glisses/glock_fx_up_chromatic_fast_01.wav	-1
+0810	Accented Hohner-Super64 Accented E3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Super64/Sustains/Accented/Hohner-Super64_Accented_E3.wav	52
+0811	Percussion Snare2-taps v3 rr2 Sum	percussion	VSCO	Percussion/Snare2-taps_v3_rr2_Sum.wav	-1
+0812	Normal Hohner-Super64 Normal E3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Super64/Sustains/Normal/Hohner-Super64_Normal _E3.wav	52
+0813	Glock glock medium G4	bells	VSCO	Percussion/Glock/glock_medium_G4.wav	67
+0814	Vib Hohner-Super64 Vib E3	winds	VCSL	Aerophones/Free Aerophones/Harmonica-Hohner-Super64/Sustains/Vib/Hohner-Super64_Vib_E3.wav	52
+0815	Marimba Marimba hit Outrigger C6 loud 01	percussion	VSCO	Percussion/Marimba/Marimba_hit_Outrigger_C6_loud_01.wav	84
+0816	Siren Main SirenWhistle-008	winds	VCSL	Aerophones/Free Aerophones/Siren/Main_SirenWhistle-008.wav	-1
+0817	Timpani Timpani3 Hit v4 rr1 Sum	percussion	VSCO	Percussion/Timpani/Timpani3_Hit_v4_rr1_Sum.wav	-1
+0818	Didgeridoo Didgeridoo1 Sus2 Main	winds	VCSL	Aerophones/Lip Aerophones/Didgeridoo/Didgeridoo1_Sus2_Main.wav	-1
+0819	Xylo Xylo Medium G3 ff 01 far	percussion	VSCO	Percussion/Xylo/Xylo_Medium_G3_ff_01_far.wav	55
+0820	Non-Vibrato BrettSaxello SusNV MainSpirit D4 vl2 rr2	winds	VCSL	Aerophones/Reed Aerophones/Saxello/Non-Vibrato/BrettSaxello_SusNV_MainSpirit_D4_vl2_rr2.wav	62
+0821	temp Triangle6-HitM v2 rr1 Sum	percussion	VSCO	Percussion/temp/Triangle6-HitM_v2_rr1_Sum.wav	-1
+0822	Staccato BrettSaxello Stcts MainSpirit D3 vl2 rr4	winds	VCSL	Aerophones/Reed Aerophones/Saxello/Staccato/BrettSaxello_Stcts_MainSpirit_D3_vl2_rr4.wav	50
+0823	pizzT pizzT D4 v2 RR1	strings	VSCO	Strings/Cello Section/pizzT/pizzT_D4_v2_RR1.wav	62
+0824	Vibrato BrettSaxello SusVB MainSpirit D3 vl2 rr1	winds	VCSL	Aerophones/Reed Aerophones/Saxello/Vibrato/BrettSaxello_SusVB_MainSpirit_D3_vl2_rr1.wav	50
+0825	spic spic D4 v2 RR1	strings	VSCO	Strings/Cello Section/spic/spic_D4_v2_RR1.wav	62
+0826	Non-Vibrato BrettTenor NV Main D5 vl3 rr1	winds	VCSL	Aerophones/Reed Aerophones/Tenor Saxophone/Non-Vibrato/BrettTenor_NV_Main_D5_vl3_rr1.wav	74
+0827	susvib susvib D4 v3 1	strings	VSCO	Strings/Cello Section/susvib/susvib_D4_v3_1.wav	62
+0828	Staccato BrettTenor Staccato Main D4 vl1 rr4	winds	VCSL	Aerophones/Reed Aerophones/Tenor Saxophone/Staccato/BrettTenor_Staccato_Main_D4_vl1_rr4.wav	62
+0829	trem trem D4 v2 1	strings	VSCO	Strings/Cello Section/trem/trem_D4_v2_1.wav	62
+0830	Vibrato BrettTenor Vib Main D3 var1	winds	VCSL	Aerophones/Reed Aerophones/Tenor Saxophone/Vibrato/BrettTenor_Vib_Main_D3_var1.wav	50
+0831	Harp KSHarp D6 mf	plucked	VSCO	Strings/Harp/KSHarp_D6_mf.wav	86
+0832	Concert Harp KSHarp D6 mf1	plucked	VCSL	Chordophones/Composite Chordophones/Concert Harp/KSHarp_D6_mf1.wav	86
+0833	Pizz BKCtbss Pizz E1 v1 rr1	strings	VSCO	Strings/Solo Contrabass/Pizz/BKCtbss_Pizz_E1_v1_rr1.wav	28
+0834	Folk Harp EWHarp Normal E1 v2 RR1	plucked	VCSL	Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E1_v2_RR1.wav	28
+0835	Spic BKCtbss Spic E0 v3 rr1	strings	VSCO	Strings/Solo Contrabass/Spic/BKCtbss_Spic_E0_v3_rr1.wav	16
+0836	Finger Strumstick Finger Str3 Main A4 vl2 rr1	strings	VCSL	Chordophones/Composite Chordophones/Strumstick/Finger/Strumstick_Finger_Str3_Main_A4_vl2_rr1.wav	69
+0837	SusNV BKCtbss SusNV E1 v1 rr1	strings	VSCO	Strings/Solo Contrabass/SusNV/BKCtbss_SusNV_E1_v1_rr1.wav	28
+0838	FX FX 05c	plucked	VCSL	Chordophones/Zithers/Dan Tranh/FX/FX_05c.wav	-1
+0839	SusVib BKCtbss SusVib E1 v1 rr1	strings	VSCO	Strings/Solo Contrabass/SusVib/BKCtbss_SusVib_E1_v1_rr1.wav	28
+0840	Gliss Gliss Up Med ff 1	plucked	VCSL	Chordophones/Zithers/Dan Tranh/Gliss/Gliss_Up_Med_ff_1.wav	-1
+0841	Trem BKCtbss Trem E2 v1 rr1	strings	VSCO	Strings/Solo Contrabass/Trem/BKCtbss_Trem_E2_v1_rr1.wav	40
+0842	Normal D#3 ff 1	plucked	VCSL	Chordophones/Zithers/Dan Tranh/Normal/D#3_ff_1.wav	51
+0843	Arco Vib LLVln ArcoVib C7 p	strings	VSCO	Strings/Solo Violin/Arco Vib/LLVln_ArcoVib_C7_p.wav	96
+0844	Tremolo D#3 Trem 1	plucked	VCSL	Chordophones/Zithers/Dan Tranh/Tremolo/D#3_Trem_1.wav	51
+0845	Pizz LLVln Pizz C7 f	strings	VSCO	Strings/Solo Violin/Pizz/LLVln_Pizz_C7_f.wav	96
+0846	Vibrato D#3 vib ff 1	plucked	VCSL	Chordophones/Zithers/Dan Tranh/Vibrato/D#3_vib_ff_1.wav	51
+0847	Trem LLVln trem E3 v1 rr1	strings	VSCO	Strings/Solo Violin/Trem/LLVln_trem_E3_v1_rr1.wav	52
+0848	Grand Piano, Kawai - Legacy GrandPno Main Sus C6 v4 rr1	plucked	VCSL	Chordophones/Zithers/Grand Piano, Kawai - Legacy/Sustains/GrandPno_Main_Sus_C6_v4_rr1.wav	84
+0849	spic LLVln spic C6 v2 rr2	strings	VSCO	Strings/Solo Violin/spic/LLVln_spic_C6_v2_rr2.wav	84
+0850	Grand Piano, Kawai GPiano sus D#5 v1 rr1 Player	plucked	VCSL	Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D#5_v1_rr1_Player.wav	75
+0851	pizz ViolaEns pizz D3 v1 rr2	strings	VSCO	Strings/Viola Section/pizz/ViolaEns_pizz_D3_v1_rr2.wav	50
+0852	NoSus JHPiano NoSus Close E1 vl3 rr1	plucked	VCSL	Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_E1_vl3_rr1.wav	28
+0853	spic Violas spic C4 v2 rr1	strings	VSCO	Strings/Viola Section/spic/Violas_spic_C4_v2_rr1.wav	60
+0854	Sus JHPiano Sus Close E5 vl3 rr1	plucked	VCSL	Chordophones/Zithers/Grand Piano, Steinway B/Sus/JHPiano_Sus_Close_E5_vl3_rr1.wav	76
+0855	susvib ViolaEns susvib D3 v1 1	strings	VSCO	Strings/Viola Section/susvib/ViolaEns_susvib_D3_v1_1.wav	50
+0856	Lute ZuckermannKitHarpsi Lute Sus D5 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, English/Sustains/Lute/ZuckermannKitHarpsi_Lute_Sus_D5_rr1.wav	74
+0857	trem Violas trem D5 v1 rr1	strings	VSCO	Strings/Viola Section/trem/Violas_trem_D5_v1_rr1.wav	74
+0858	Normal ZuckermannKitHarpsi Normal Sus D5 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, English/Sustains/Normal/ZuckermannKitHarpsi_Normal_Sus_D5_rr1.wav	74
+0859	Pizz VlnEns Pizz D3 v1 rr1	strings	VSCO	Strings/Violin Section/Pizz/VlnEns_Pizz_D3_v1_rr1.wav	50
+0860	High HarpsiRH High Far E2 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, Flemish/Sustains/High/HarpsiRH_High_Far_E2_rr1.wav	40
+0861	Spic VlnEns Spic C4 v2 rr1	strings	VSCO	Strings/Violin Section/Spic/VlnEns_Spic_C4_v2_rr1.wav	60
+0862	Low HarpsiRH Low Far E1 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, Flemish/Sustains/Low/HarpsiRH_Low_Far_E1_rr1.wav	28
+0863	Trem VlnEns Trem D3 v1	strings	VSCO	Strings/Violin Section/Trem/VlnEns_Trem_D3_v1.wav	50
+0864	Harpsichord, French Harpsi2 Normal D2 rr3 Main	plucked	VCSL	Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_D2_rr3_Main.wav	38
+0865	susVib VlnEns susVib D3 v1	strings	VSCO	Strings/Violin Section/susVib/VlnEns_susVib_D3_v1.wav	50
+0866	stop1 Harpsichord stop1 D#3 1	plucked	VCSL	Chordophones/Zithers/Harpsichord, Italian/Sustains/stop1/Harpsichord_stop1_D#3_1.wav	51
+0867	bass bdrum muted fff 1	percussion	VSCO	VSCO 1 Percussion/drums/bass/bdrum_muted_fff_1.wav	-1
+0868	Harpsichord, Unk Harpsi4 Sus Main D1 rr1	plucked	VCSL	Chordophones/Zithers/Harpsichord, Unk/Sustains/Harpsi4_Sus_Main_D1_rr1.wav	26
+0869	Bongos LowBongo1	percussion	VSCO	VSCO 1 Percussion/drums/other/Bongos/LowBongo1.wav	-1
+0870	LongBow BowedPsaltery D5 Main LongBow rr2	plucked	VCSL	Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_D5_Main_LongBow_rr2.wav	74
+0871	muted ethnicHigh hit pp 1	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/congo/muted/ethnicHigh_hit_pp_1.wav	-1
+0872	Pluck BowedPsaltery D5 Main Pluck rr1	plucked	VCSL	Chordophones/Zithers/Psaltery, Bowed and Plucked/Pluck/BowedPsaltery_D5_Main_Pluck_rr1.wav	74
+0873	open ethnicLowOpen hit f 3	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/congo/open/ethnicLowOpen_hit_f_3.wav	-1
+0874	Spiccato BowedPsaltery D5 Main Spic rr1	plucked	VCSL	Chordophones/Zithers/Psaltery, Bowed and Plucked/Spiccato/BowedPsaltery_D5_Main_Spic_rr1.wav	74
+0875	giant EthnicLargeStick rimshot 3	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/giant/EthnicLargeStick_rimshot_3.wav	-1
+0876	Off Player PedOff 002	plucked	VCSL	Chordophones/Zithers/Upright Piano, Knight/Pedal/Off/Player_PedOff_002.wav	-1
+0877	hand EthnicLargeHand hit mp 3	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_mp_3.wav	-1
+0878	On Player PedOn 002	plucked	VCSL	Chordophones/Zithers/Upright Piano, Knight/Pedal/On/Player_PedOn_002.wav	-1
+0879	mallet EthnicLargeMallet hit ff 2	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/giant/mallet/EthnicLargeMallet_hit_ff_2.wav	-1
+0880	Upright Piano, Knight Player vl1 rr1 G6	plucked	VCSL	Chordophones/Zithers/Upright Piano, Knight/Sustains/Player_vl1_rr1_G6.wav	91
+0881	sticks EthnicLargeSticks hit mf 2	percussion	VSCO	VSCO 1 Percussion/drums/other/ethnic/giant/sticks/EthnicLargeSticks_hit_mf_2.wav	-1
+0882	Upright Piano, Yamaha Upright1 Sus C6 vl2 rr2	plucked	VCSL	Chordophones/Zithers/Upright Piano, Yamaha/Sustains/Upright1_Sus_C6_vl2_rr2.wav	84
+0883	drum1 snare1 fff 2	percussion	VSCO	VSCO 1 Percussion/drums/snare/drum1/snare1_fff_2.wav	-1
+0884	Clavisynth Clavisynth E1 vl3	synth	VCSL	Electrophones/TX81Z/Clavisynth/Clavisynth_E1_vl3.wav	28
+0885	drum2 snare2 nosnare p 1	percussion	VSCO	VSCO 1 Percussion/drums/snare/drum2/snare2_nosnare_p_1.wav	-1
+0886	FM Piano FMPiano E3 vl1	synth	VCSL	Electrophones/TX81Z/FM Piano/FMPiano_E3_vl1.wav	52
+0887	drum3 marching snare3 fff 1	percussion	VSCO	VSCO 1 Percussion/drums/snare/drum3_marching/snare3_fff_1.wav	-1
+0888	Piano 1 Piano 1 E2 vl3	synth	VCSL	Electrophones/TX81Z/Piano 1/Piano 1_E2_vl3.wav	40
+0889	tenor higher tenorH fff 2	percussion	VSCO	VSCO 1 Percussion/drums/tenor/tenor_higher/tenorH_fff_2.wav	-1
+0890	Fast glass3 A#4 Fast 1 Main	percussion	VCSL	Idiophones/Friction Idiophones/Wine Glasses/Sustains/Fast/glass3_A#4_Fast_1_Main.wav	70
+0891	tenor lower tenor mf 1	percussion	VSCO	VSCO 1 Percussion/drums/tenor/tenor_lower/tenor_mf_1.wav	-1
+0892	Slow glass3 A#4 Slow 1 Main	percussion	VCSL	Idiophones/Friction Idiophones/Wine Glasses/Sustains/Slow/glass3_A#4_Slow_1_Main.wav	70
+0893	clash crash hit fff loose	metal	VSCO	VSCO 1 Percussion/varMetal/Cymbals/clash/crash_hit_fff_loose.wav	-1
+0894	Kalimba, Kenya Mbira6 Normal MainSpirit D#3 k6 vl3 rr2	plucked	VCSL	Idiophones/Plucked Idiophones/Kalimba, Kenya/Mbira6_Normal_MainSpirit_D#3_k6_vl3_rr2.wav	51
+0895	susp susp hit metal 2 mf	metal	VSCO	VSCO 1 Percussion/varMetal/Cymbals/susp/susp_hit_metal_2_mf.wav	-1
+0896	Kalimba, Tanzania MBira3 pluck Main D#4 k4 50 100 rr2	plucked	VCSL	Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D#4_k4_50_100_rr2.wav	63
+0897	Gong gong hit p hard	metal	VSCO	VSCO 1 Percussion/varMetal/Gong/gong_hit_p_hard.wav	-1
+0898	Mbira Mavembe (Gandanga), Zimbabwe, Low G Mbira5 Normal Main	plucked	VCSL	Idiophones/Plucked Idiophones/Mbira Mavembe (Gandanga), Zimbabwe, Low G/Mbira5_Normal_MainSpirit_D3_k11_vl2_rr1.wav	50
+0899	1 triangle1 hit mp muted3	percussion	VSCO	VSCO 1 Percussion/varMetal/triangle/1/triangle1_hit_mp_muted3.wav	-1
+0900	Mbira dzaVadzimu Nyamaropa, Zimbabwe, Low B MBira4 pluck Mai	plucked	VCSL	Idiophones/Plucked Idiophones/Mbira dzaVadzimu Nyamaropa, Zimbabwe, Low B/MBira4_pluck_Main_D#2_12_50_100_rr2.wav	39
+0901	2 triangle2 hit p	percussion	VSCO	VSCO 1 Percussion/varMetal/triangle/2/triangle2_hit_p.wav	-1
+0902	Nyunga Nyunga, Mozambique, Low F Mbira2 Normal MainSpirit D4	plucked	VCSL	Idiophones/Plucked Idiophones/Nyunga Nyunga, Mozambique, Low F/Mbira2_Normal_MainSpirit_D4_k16_vl3_rr2.wav	62
+0903	3 triangle3 hit mp pt2	percussion	VSCO	VSCO 1 Percussion/varMetal/triangle/3/triangle3_hit_mp_pt2.wav	-1
+0904	Agogo Bells Agogo High v3 rr1 Mid	bells	VCSL	Idiophones/Struck Idiophones/Agogo Bells/Agogo_High_v3_rr1_Mid.wav	-1
+0905	4 triangle4 hit mp	percussion	VSCO	VSCO 1 Percussion/varMetal/triangle/4/triangle4_hit_mp.wav	-1
+0906	Legacy agogoBell3 f 2	bells	VCSL	Idiophones/Struck Idiophones/Agogo Bells/Legacy/agogoBell3_f_2.wav	-1
+0907	various cowbell mf 2	bells	VSCO	VSCO 1 Percussion/varMetal/various/cowbell_mf_2.wav	-1
+0908	Anvil Anvil Hit2 v2 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Anvil/Anvil_Hit2_v2_rr1_Mid.wav	-1
+0909	varWood tambourine down 6	percussion	VSCO	VSCO 1 Percussion/varWood/tambourine_down_6.wav	-1
+0910	Hard Mallet EthnicXylo hardM C5 vl3 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Balafon/Hard Mallet/EthnicXylo_hardM_C5_vl3_rr1_Mid.wav	72
+0911	sus PSBassoon C3 v1 1	winds	VSCO	Woodwinds/Bassoon/sus/PSBassoon_C3_v1_1.wav	48
+0912	Soft Mallet EthnicXylo softM C4 vl3 rr2 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Balafon/Soft Mallet/EthnicXylo_softM_C4_vl3_rr2_Mid.wav	60
+0913	vib PSBassoon C4 v1 1	winds	VSCO	Woodwinds/Bassoon/vib/PSBassoon_C4_v1_1.wav	60
+0914	Traditional Mallet EthnicXylo tradM C4 vl3 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Balafon/Traditional Mallet/EthnicXylo_tradM_C4_vl3_rr1_Mid.wav	60
+0915	susLong DCClar susLong D4 v2 rr1 sum	winds	VSCO	Woodwinds/Clarinet/susLong/DCClar_susLong_D4_v2_rr1_sum.wav	62
+0916	Individual BellTree Hit D5 rr1 Mid	bells	VCSL	Idiophones/Struck Idiophones/Bell Tree/Individual/BellTree_Hit_D5_rr1_Mid.wav	74
+0917	expvib LDFlute expvib C6 v1 1	winds	VSCO	Woodwinds/Flute/expvib/LDFlute_expvib_C6_v1_1.wav	84
+0918	Stroke BellTree Stroke 3 Mid	bells	VCSL	Idiophones/Struck Idiophones/Bell Tree/Stroke/BellTree_Stroke_3_Mid.wav	-1
+0919	stac LDFlute stac C4 v4 rr1	winds	VSCO	Woodwinds/Flute/stac/LDFlute_stac_C4_v4_rr1.wav	60
+0920	Brake Drum BrakeDrum1 YarnM v3 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Brake Drum/BrakeDrum1_YarnM_v3_rr1_Mid.wav	-1
+0921	susNV LDFlute susNV C4 v3 1	winds	VSCO	Woodwinds/Flute/susNV/LDFlute_susNV_C4_v3_1.wav	60
+0922	Cabasa Cabasa1 Rub v1 rr2 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Cabasa/Cabasa1_Rub_v1_rr2_Mid.wav	-1
+0923	susvib LDFlute susvib C5 v1 1	winds	VSCO	Woodwinds/Flute/susvib/LDFlute_susvib_C5_v1_1.wav	72
+0924	Cajon Cajon hit2 mp rr1	percussion	VCSL	Idiophones/Struck Idiophones/Cajon/Cajon_hit2_mp_rr1.wav	-1
+0925	Stacc Oboe Stacc D3 v1 rr2 Main	winds	VSCO	Woodwinds/Oboe/Stacc/Oboe_Stacc_D3_v1_rr2_Main.wav	50
+0926	Sus Oboe Sus D4 v1 Main	winds	VSCO	Woodwinds/Oboe/Sus/Oboe_Sus_D4_v1_Main.wav	62
+0927	Clash Cymbals 1 cymbal crash1 mp1	metal	VCSL	Idiophones/Struck Idiophones/Clash Cymbals 1/cymbal_crash1_mp1.wav	-1
+0928	Vib Oboe Vib D4 v1 Main	winds	VSCO	Woodwinds/Oboe/Vib/Oboe_Vib_D4_v1_Main.wav	62
+0929	Clash Cymbals 2 cymbal crash2 fff2	metal	VCSL	Idiophones/Struck Idiophones/Clash Cymbals 2/cymbal_crash2_fff2.wav	-1
+0930	Sus piccolo G4 sustain1	winds	VSCO	Woodwinds/Piccolo/Sus/piccolo_G4_sustain1.wav	67
+0931	Claves Claves1 Hit v3 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Claves/Claves1_Hit_v3_rr1_Mid.wav	-1
+0932	Cowbells Cowbell1 Normal v3 rr1 Mid	bells	VCSL	Idiophones/Struck Idiophones/Cowbells/Cowbell1_Normal_v3_rr1_Mid.wav	-1
+0933	Flexatone flexatone long	percussion	VCSL	Idiophones/Struck Idiophones/Flexatone/flexatone_long.wav	-1
+0934	Glockenspiel glock medium C7 01	bells	VCSL	Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C7_01.wav	96
+0935	Gong 1 gong f	metal	VCSL	Idiophones/Struck Idiophones/Gong 1/gong_f.wav	-1
+0936	Guiro Guiro Hit rr2 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Guiro/Guiro_Hit_rr2_Mid.wav	-1
+0937	Legacy guiro superlong	percussion	VCSL	Idiophones/Struck Idiophones/Guiro/Legacy/guiro_superlong.wav	-1
+0938	Hand Bells, Nepalese HB 2	bells	VCSL	Idiophones/Struck Idiophones/Hand Bells, Nepalese/HB_2.wav	-1
+0939	Hand Chimes sus D5 r01 main	bells	VCSL	Idiophones/Struck Idiophones/Hand Chimes/sus_D5_r01_main.wav	74
+0940	Hi-Hat Cymbal HiHat HitC v3 rr2 Mid	metal	VCSL	Idiophones/Struck Idiophones/Hi-Hat Cymbal/HiHat_HitC_v3_rr2_Mid.wav	-1
+0941	Marimba Marimba hit Outrigger C6 soft 01	percussion	VCSL	Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C6_soft_01.wav	84
+0942	Legacy windchimes fastAsc1	bells	VCSL	Idiophones/Struck Idiophones/Mark Trees/Legacy/windchimes_fastAsc1.wav	-1
+0943	Ratchet Ratchet2 Crank v1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Ratchet/Ratchet2_Crank_v1_rr1_Mid.wav	-1
+0944	Shaker, Large LShaker Shake1D rr2 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Shaker, Large/LShaker_Shake1D_rr2_Mid.wav	-1
+0945	Slapstick slapstick rr2	percussion	VCSL	Idiophones/Struck Idiophones/Slapstick/slapstick_rr2.wav	-1
+0946	Sleigh Bells sleighbell1 shake1	bells	VCSL	Idiophones/Struck Idiophones/Sleigh Bells/sleighbell1_shake1.wav	-1
+0947	Slit Drum LogDrumHi MedM v3 rr1 Sum	percussion	VCSL	Idiophones/Struck Idiophones/Slit Drum/LogDrumHi_MedM_v3_rr1_Sum.wav	-1
+0948	Suspended Cymbal 1 susCymb1 hit bell fff1	bells	VCSL	Idiophones/Struck Idiophones/Suspended Cymbal 1/susCymb1_hit_bell_fff1.wav	-1
+0949	Suspended Cymbal 2 susCymb2 hit f1	metal	VCSL	Idiophones/Struck Idiophones/Suspended Cymbal 2/susCymb2_hit_f1.wav	-1
+0950	Tambourine 1 Tamb1 Shake rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Tambourine 1/Tamb1_Shake_rr1_Mid.wav	-1
+0951	Tambourine 2 Tamb2 Shake rr3 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Tambourine 2/Tamb2_Shake_rr3_Mid.wav	-1
+0952	Tambourine 3 - Legacy tambourine down rr2	percussion	VCSL	Idiophones/Struck Idiophones/Tambourine 3 - Legacy/tambourine_down_rr2.wav	-1
+0953	Triangles Triangle3 Hit v1 rr1 Mid	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Triangle3_Hit_v1_rr1_Mid.wav	-1
+0954	1 triangle1 hit mp muted3	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Legacy/1/triangle1_hit_mp_muted3.wav	-1
+0955	2 triangle2 hit p	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Legacy/2/triangle2_hit_p.wav	-1
+0956	3 triangle3 hit mp pt2	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Legacy/3/triangle3_hit_mp_pt2.wav	-1
+0957	4 triangle4 hit mp	percussion	VCSL	Idiophones/Struck Idiophones/Triangles/Legacy/4/triangle4_hit_mp.wav	-1
+0958	Tubular Bells 1 chimes D4 ff rr2	bells	VCSL	Idiophones/Struck Idiophones/Tubular Bells 1/chimes_D4_ff_rr2.wav	62
+0959	Tubular Bells 2 TB hit E4 v2 1	bells	VCSL	Idiophones/Struck Idiophones/Tubular Bells 2/TB_hit_E4_v2_1.wav	64
+0960	Tubular Glockenspiel D1 medium1	bells	VCSL	Idiophones/Struck Idiophones/Tubular Glockenspiel/D1_medium1.wav	26
+0961	Bowed Vibes bowed D4 rr1 Main	percussion	VCSL	Idiophones/Struck Idiophones/Vibraphone/Bowed/Vibes_bowed_D4_rr1_Main.wav	62
+0962	Hard Mallets Vibes hard D4 v2 rr1 Main	percussion	VCSL	Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_D4_v2_rr1_Main.wav	62
+0963	Soft Mallets Vibes soft D4 v1 rr1 Main	percussion	VCSL	Idiophones/Struck Idiophones/Vibraphone/Soft Mallets/Vibes_soft_D4_v1_rr1_Main.wav	62
+0964	Legacy vibraslap rr3	percussion	VCSL	Idiophones/Struck Idiophones/Vibraslap/Legacy/vibraslap_rr3.wav	-1
+0965	Woodblock wood click3 vl2	percussion	VCSL	Idiophones/Struck Idiophones/Woodblock/wood_click3_vl2.wav	-1
+0966	Hard Mallets Xylo Hard G3 ff 01 far	percussion	VCSL	Idiophones/Struck Idiophones/Xylophone/Hard Mallets/Xylo_Hard_G3_ff_01_far.wav	55
+0967	Medium Mallets Xylo Medium G3 ff 01 far	percussion	VCSL	Idiophones/Struck Idiophones/Xylophone/Medium Mallets/Xylo_Medium_G3_ff_01_far.wav	55
+0968	Soft Mallets Xylo Soft G3 ff 01 far	percussion	VCSL	Idiophones/Struck Idiophones/Xylophone/Soft Mallets/Xylo_Soft_G3_ff_01_far.wav	55
+0969	Ocean Drum OceanDrum Sus 3 Mid	drums	VCSL	Membranophones/Other Membranophones/Ocean Drum/OceanDrum_Sus_3_Mid.wav	-1
+0970	Bass Drum 1 BDrumNew hit v5 rr1 Sum	drums	VCSL	Membranophones/Struck Membranophones/Bass Drum 1/BDrumNew_hit_v5_rr1_Sum.wav	-1
+0971	Bass Drum 2 bassdrum hit mp1	drums	VCSL	Membranophones/Struck Membranophones/Bass Drum 2/bassdrum_hit_mp1.wav	-1
+0972	Bass Drum 3 - Legacy bdrum muted fff rr1	drums	VCSL	Membranophones/Struck Membranophones/Bass Drum 3 - Legacy/bdrum_muted_fff_rr1.wav	-1
+0973	Bongos BongoH HitMuted1 v3 rr2 Mid	drums	VCSL	Membranophones/Struck Membranophones/Bongos/BongoH_HitMuted1_v3_rr2_Mid.wav	-1
+0974	Conga Quinto HitN v1 rr2 Sum	drums	VCSL	Membranophones/Struck Membranophones/Conga/Quinto_HitN_v1_rr2_Sum.wav	-1
+0975	Darbuka Darbuka 1 hit vl2 rr1	drums	VCSL	Membranophones/Struck Membranophones/Darbuka/Darbuka_1_hit_vl2_rr1.wav	-1
+0976	Frame Drum HDrumL Hit v3 rr2 Sum	drums	VCSL	Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hit_v3_rr2_Sum.wav	-1
+0977	drum1 snare1 fff rr2	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Snares/drum1/snare1_fff_rr2.wav	-1
+0978	drum2 snare2 nosnare p rr1	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Snares/drum2/snare2_nosnare_p_rr1.wav	-1
+0979	drum3 marching snare3 fff rr1	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Snares/drum3_marching/snare3_fff_rr1.wav	-1
+0980	tenor higher tenorH fff rr2	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Toms/tenor_higher/tenorH_fff_rr2.wav	-1
+0981	tenor lower tenor mf rr1	percussion	VCSL	Membranophones/Struck Membranophones/Legacy Toms/tenor_lower/tenor_mf_rr1.wav	-1
+0982	Snare Drum, Modern 1 Snare2 HitSN v5 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Modern 1/Snare2_HitSN_v5_rr1_Mid.wav	-1
+0983	Snare Drum, Modern 2 Snare3M HitSN v4 rr2 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Modern 2/Snare3M_HitSN_v4_rr2_Mid.wav	-1
+0984	Snare Drum, Modern 3 Snare4 rimshot v2 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Modern 3/Snare4_rimshot_v2_rr1_Mid.wav	-1
+0985	Snare Drum, Rope Tension RopeSnare stick Main vl1 rr1	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Rope Tension/RopeSnare_stick_Main_vl1_rr1.wav	-1
+0986	Hi RopeSnare hi sn Main vl3 rr1	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Rope Tension/Hi/RopeSnare_hi_sn_Main_vl3_rr1.wav	-1
+0987	Low RopeSnare low sn Main vl3 rr1	percussion	VCSL	Membranophones/Struck Membranophones/Snare Drum, Rope Tension/Low/RopeSnare_low_sn_Main_vl3_rr1.wav	-1
+0988	Hit Timpani3 Hit v3 rr1 Sum	drums	VCSL	Membranophones/Struck Membranophones/Timpani 1/Hit/Timpani3_Hit_v3_rr1_Sum.wav	-1
+0989	Hit Timpani6F hit v2 rr1 main	drums	VCSL	Membranophones/Struck Membranophones/Timpani 2/Hit/Timpani6F_hit_v2_rr1_main.wav	-1
+0990	Tom 1 TomH rimS v2 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 1/TomH_rimS_v2_rr1_Mid.wav	-1
+0991	Mallet TomH HitM v3 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 1/Mallet/TomH_HitM_v3_rr1_Mid.wav	-1
+0992	Stick TomH HitS v3 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 1/Stick/TomH_HitS_v3_rr1_Mid.wav	-1
+0993	Tom 2 TomL rimS v2 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 2/TomL_rimS_v2_rr1_Mid.wav	-1
+0994	Mallet TomL HitM v3 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 2/Mallet/TomL_HitM_v3_rr1_Mid.wav	-1
+0995	Stick TomL HitS v3 rr1 Mid	percussion	VCSL	Membranophones/Struck Membranophones/Tom 2/Stick/TomL_HitS_v3_rr1_Mid.wav	-1
+0996	mute MOHorn mute G#3 v2 1	brass	VSCO	Brass/F Horn/mute/MOHorn_mute_G#3_v2_1.wav	56
+0997	SusVib AltRecorder SusVib G#4 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Alto Recorder/SusVib/AltRecorder_SusVib_G#4_rr1_Main.wav	68
+0998	stac MOHorn stac G1 v2 rr2	brass	VSCO	Brass/F Horn/stac/MOHorn_stac_G1_v2_rr2.wav	31
+0999	Sustain AltRecorder Sus G#4 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Alto Recorder/Sustain/AltRecorder_Sus_G#4_rr1_Main.wav	68
+1000	sus MOHorn sus G1 v3 1	brass	VSCO	Brass/F Horn/sus/MOHorn_sus_G1_v3_1.wav	31
+1001	SusVib BassRecorder SusVib G3 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Bass Recorder/SusVib/BassRecorder_SusVib_G3_rr1_Main.wav	55
+1002	Buzz Trombone Buzz G2 v2 1	brass	VSCO	Brass/OldTrombone/Buzz/Trombone_Buzz_G2_v2_1.wav	43
+1003	Sustain BassRecorder Sus G#3 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Bass Recorder/Sustain/BassRecorder_Sus_G#3_rr1_Main.wav	56
+1004	Fall Trombone Fall G2 1	brass	VSCO	Brass/OldTrombone/Fall/Trombone_Fall_G2_1.wav	43
+1005	Sustain SopRecorder Sus G5 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Soprano Recorder/Sustain/SopRecorder_Sus_G5_rr1_Main.wav	79
+1006	Short Trombone Short G2 v3 4	brass	VSCO	Brass/OldTrombone/Short/Trombone_Short_G2_v3_4.wav	43
+1007	SusVib TenRecorder SusVib G4 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Tenor Recorder/SusVib/TenRecorder_SusVib_G4_rr1_Main.wav	67
+1008	Sustain Trombone Sustain G3 v5 1	brass	VSCO	Brass/OldTrombone/Sustain/Trombone_Sustain_G3_v5_1.wav	55
+1009	Sustain TenRecorder Sus G#4 rr1 Main	winds	VCSL	Aerophones/Edge-blown Aerophones/Baroque Tenor Recorder/Sustain/TenRecorder_Sus_G#4_rr1_Main.wav	68
+1010	Vibrato Trombone Vibrato G2 v1 2	brass	VSCO	Brass/OldTrombone/Vibrato/Trombone_Vibrato_G2_v1_2.wav	43
+1011	Sustain ocarina G5 sustain0	winds	VCSL	Aerophones/Edge-blown Aerophones/Ocarina, Small/Sustain/ocarina_G5_sustain0.wav	79
+1012	stac tenortbn stac F3 v4 rr2	brass	VSCO	Brass/Tenor Trombone/stac/tenortbn_stac_F3_v4_rr2.wav	53
+1013	Sus StdOcarina Sus G#4	winds	VCSL	Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/Sus/StdOcarina_Sus_G#4.wav	68
+1014	sus tenortbn sus F3 v3 1	brass	VSCO	Brass/Tenor Trombone/sus/tenortbn_sus_F3_v3_1.wav	53
+1015	SusVib StdOcarina SusVib G#4	winds	VCSL	Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/SusVib/StdOcarina_SusVib_G#4.wav	68
+1016	vib tenortbn vib G#2 v1 2	brass	VSCO	Brass/Tenor Trombone/vib/tenortbn_vib_G#2_v1_2.wav	44
+1017	Loud Rode Man3Open F#5	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Loud/Rode_Man3Open_F#5.wav	78
+1018	harmonM-sus Sum SHTrumpet harmonM-sus G#3 v3 rr1	brass	VSCO	Brass/Trumpet/harmonM-sus/Sum_SHTrumpet_harmonM-sus_G#3_v3_rr1.wav	56
+1019	Loud Pedal Rode Pedal F#3	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Loud Pedal/Rode_Pedal_F#3.wav	54
+1020	stac Sum SHTrumpet stac G3 v3 rr2	brass	VSCO	Brass/Trumpet/stac/Sum_SHTrumpet_stac_G3_v3_rr2.wav	55
+1021	Quiet NT5 Man3Quiet F#5 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_F#5_rr1.wav	78
+1022	straightM-sus Sum SHTrumpet straightM-sus G3 v3 rr1	brass	VSCO	Brass/Trumpet/straightM-sus/Sum_SHTrumpet_straightM-sus_G3_v3_rr1.wav	55
+1023	Quiet Pedal NT5 PedalQuiet F#3 rr1	keys	VCSL	Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet Pedal/NT5_PedalQuiet_F#3_rr1.wav	54

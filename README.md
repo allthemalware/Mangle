@@ -182,4 +182,6 @@ nih-plug's `vst3` feature (whose GPLv3 `vst3-sys` binding is compatible with
 this license).
 
 ## Factory bank
-`factory/` holds the factory presets and source sounds (formats in `FACTORY.md`; recorded sources are CC0 from VCSL and VSCO 2 CE, licence per file in `sources.tsv`). Install it with `tools/install-factory.sh`, then open the BROWSER tab. Regenerate the generated sources with `cargo xtask gen-sources <dir>`.
+`factory/` holds 256 presets (8 categories x 32) and 1,023 source sounds: 499 synthesised (265 stereo) and 524 CC0 recordings from VCSL and VSCO 2 CE (licence and origin per file in `sources.tsv`). Formats are in `FACTORY.md`.
+
+The index and presets are committed; the audio (~235 MB) is not. Rebuild it with `tools/build_factory.sh` (needs cargo, ffmpeg, curl, python3), then `tools/install-factory.sh` copies `factory/` to the plugin's data folder. Open the BROWSER tab to use it. `tools/make_factory_presets.py` regenerates the presets; `tools/curate_recorded.py` regenerates the recording picks.

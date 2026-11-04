@@ -1,0 +1,14 @@
+mangle-preset 1
+name Growl Organ Drawbar
+category Basses
+author Mangle
+slot 0 0095
+p 070000 0.2835
+p 020001 0.5541
+p 020004 0.2055
+p 020006 0.4767
+p 02000e 0.0000
+p 020013 0.6667
+p 080000 0.2941
+p 080001 0.5257
+p 080002 0.5375

@@ -1,0 +1,13 @@
+mangle-preset 1
+name Echo Pluck Vibraphone
+category Plucks
+author Mangle
+slot 0 0725
+p 070000 0.3543
+p 000002 0.5789
+p 020002 1.0000
+p 020003 0.8333
+p 020004 0.0394
+p 020006 0.5353
+p 020005 0.0000
+p 020013 0.6667

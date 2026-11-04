@@ -1,0 +1,10 @@
+mangle-preset 1
+name Tight Pluck Organ Drawbar
+category Plucks
+author Mangle
+slot 0 0093
+p 070000 0.6614
+p 020001 0.2095
+p 020004 0.0324
+p 020006 0.5525
+p 020013 1.0000

@@ -1,0 +1,11 @@
+mangle-preset 1
+name Stutter Tambourine Shake 2
+category Rhythmic
+author Mangle
+slot 0 0950
+p 020002 1.0000
+p 020003 0.8333
+p 020006 0.3681
+p 020005 0.0000
+p 020007 0.0101
+p 020010 1.0000

@@ -1,0 +1,12 @@
+mangle-preset 1
+name Triplet Ratchet Crank
+category Rhythmic
+author Mangle
+slot 0 0943
+p 000002 0.6252
+p 020002 1.0000
+p 020003 0.7333
+p 020004 0.0380
+p 020006 0.3846
+p 020005 0.0000
+p 02000e 0.5000

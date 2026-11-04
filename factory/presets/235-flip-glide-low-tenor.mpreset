@@ -1,0 +1,14 @@
+mangle-preset 1
+name Flip Glide Low Tenor
+category FX
+author Mangle
+slot 0 0891
+p 000002 0.7467
+p 020001 0.3884
+p 020004 0.1951
+p 020006 0.7138
+p 020014 0.6667
+p 030002 0.3710
+p 080000 0.2059
+p 080001 1.0000
+p 080002 0.6125

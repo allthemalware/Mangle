@@ -1,0 +1,14 @@
+mangle-preset 1
+name Warm Keys Tine Bell
+category Keys
+author Mangle
+slot 0 0077
+p 070000 0.2835
+p 000002 0.5176
+p 020001 0.3531
+p 020004 0.0387
+p 020006 0.6312
+p 020013 0.6667
+p 090000 1.0000
+p 090002 0.6704
+p 090003 0.1177

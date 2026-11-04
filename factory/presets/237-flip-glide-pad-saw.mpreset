@@ -1,0 +1,15 @@
+mangle-preset 1
+name Flip Glide Pad Saw
+category FX
+author Mangle
+slot 0 0103
+p 070000 0.4724
+p 000002 0.6631
+p 020001 0.4181
+p 020004 0.1705
+p 020006 0.6690
+p 020014 0.6667
+p 030002 0.2638
+p 080000 0.2059
+p 080001 1.0000
+p 080002 0.6125

@@ -1,0 +1,13 @@
+mangle-preset 1
+name Echo Pluck Wood Bar
+category Plucks
+author Mangle
+slot 0 0060
+p 070000 0.3780
+p 000002 0.6192
+p 020002 1.0000
+p 020003 0.7667
+p 020004 0.0226
+p 020006 0.5535
+p 020005 0.0000
+p 020013 0.6667

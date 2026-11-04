@@ -1,0 +1,10 @@
+mangle-preset 1
+name Tight Pluck Concert Harp
+category Plucks
+author Mangle
+slot 0 0590
+p 070000 0.3543
+p 020001 0.2042
+p 020004 0.0277
+p 020006 0.4977
+p 020013 1.0000

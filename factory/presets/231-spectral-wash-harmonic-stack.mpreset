@@ -1,0 +1,15 @@
+mangle-preset 1
+name Spectral Wash Harmonic Stack
+category FX
+author Mangle
+slot 0 0374
+p 070000 0.7559
+p 000002 0.7179
+p 020014 1.0000
+p 020001 0.2946
+p 020006 0.6447
+p 02000a 0.7910
+p 080000 0.2059
+p 080001 0.6374
+p 080002 0.5375
+p 030002 0.1495

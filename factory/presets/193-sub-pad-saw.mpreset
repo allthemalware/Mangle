@@ -1,0 +1,13 @@
+mangle-preset 1
+name Sub Pad Saw
+category Basses
+author Mangle
+slot 0 0101
+p 070000 0.2835
+p 020001 0.4931
+p 020004 0.0366
+p 020006 0.6439
+p 02000e 0.0000
+p 090000 1.0000
+p 090002 0.4217
+p 090003 0.1000

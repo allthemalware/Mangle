@@ -1,0 +1,14 @@
+mangle-preset 1
+name Growl Contrabass Vibrato
+category Basses
+author Mangle
+slot 0 0597
+p 070000 0.1732
+p 020001 0.5218
+p 020004 0.1323
+p 020006 0.4995
+p 02000e 0.0000
+p 020013 0.6667
+p 080000 0.2941
+p 080001 0.5336
+p 080002 0.5375

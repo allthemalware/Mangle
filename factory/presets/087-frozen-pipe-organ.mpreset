@@ -1,0 +1,12 @@
+mangle-preset 1
+name Frozen Pipe Organ
+category Drones
+author Mangle
+slot 0 0782
+p 070000 0.2126
+p 000001 0.0000
+p 000002 0.6599
+p 020001 0.2327
+p 020006 0.6033
+p 020014 1.0000
+p 02000a 0.6840

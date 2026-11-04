@@ -1,0 +1,15 @@
+mangle-preset 1
+name Fog Unison Pad
+category Drones
+author Mangle
+slot 0 0332
+p 070000 0.3780
+p 000001 0.0000
+p 000002 0.6328
+p 020001 0.3199
+p 020004 0.2297
+p 020006 0.8303
+p 020014 0.3333
+p 080000 0.2941
+p 080001 0.6557
+p 080002 0.6125

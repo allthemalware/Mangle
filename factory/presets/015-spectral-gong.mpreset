@@ -1,9 +1,0 @@
-mangle-preset 1
-name Spectral Gong
-category FX
-author Mangle
-slot 0 0515
-p 000002 0.7000
-p 020014 1.0000
-p 020001 0.2714
-p 020006 0.6694

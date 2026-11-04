@@ -1,0 +1,12 @@
+mangle-preset 1
+name Pulse High Tom
+category Rhythmic
+author Mangle
+slot 0 0992
+p 020002 1.0000
+p 020003 0.7667
+p 020004 0.0036
+p 020006 0.4148
+p 020005 0.0000
+p 020011 0.2124
+p 02000a 0.1233

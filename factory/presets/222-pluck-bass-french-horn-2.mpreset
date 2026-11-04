@@ -1,0 +1,14 @@
+mangle-preset 1
+name Pluck Bass French Horn 2
+category Basses
+author Mangle
+slot 0 0519
+p 070000 0.2677
+p 020001 0.2334
+p 020004 0.0169
+p 020006 0.5233
+p 02000e 0.0000
+p 020013 1.0000
+p 090000 1.0000
+p 090002 0.5190
+p 090003 0.1400

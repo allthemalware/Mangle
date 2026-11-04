@@ -1,0 +1,14 @@
+mangle-preset 1
+name Spectral Wash Cajon Hit
+category FX
+author Mangle
+slot 0 0924
+p 000002 0.6627
+p 020014 1.0000
+p 020001 0.2833
+p 020006 0.7032
+p 02000a 0.2823
+p 080000 0.2059
+p 080001 0.6453
+p 080002 0.5375
+p 030002 0.0580
