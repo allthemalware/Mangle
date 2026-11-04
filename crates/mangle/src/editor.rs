@@ -11,7 +11,8 @@
 //! * click = toggle (bools) · Ctrl-click = reset to default / clear
 //! * padlock on a section header = exclude that unit from RANDOM
 //! * matrix: right-click Source/Scale/Dest for a picker menu; Dest also offers
-//!   PICK FROM CONTROL (then touch any destination control; Esc cancels)
+//!   PICK FROM CONTROL (then touch any destination control, including an
+//!   engine's GATE button and LOOP cell; Esc cancels)
 //! * RND = randomize (right-click for Amount / Complexity / seed / pools)
 //! * waveform: drag loop edges, drag the region body to move it
 //! * body tabs: ENGINES (one engine at a time) / MOD / MATRIX / CURVES
@@ -1596,9 +1597,18 @@ fn engines_page(
         let gate = params.cp(Module::Grain, eng as u8, 0);
         let on = gate.norm() >= 0.5;
         if tbtn(ui, "GATE", on, 56.0).clicked() {
-            gate.begin(setter);
-            gate.set(setter, if on { 0.0 } else { 1.0 });
-            gate.end(setter);
+            if st.learn.is_some() {
+                assign_pick(
+                    setter,
+                    params,
+                    st,
+                    matrix::ModDest::Grain(eng as u8, matrix::GrainDest::Gate),
+                );
+            } else {
+                gate.begin(setter);
+                gate.set(setter, if on { 0.0 } else { 1.0 });
+                gate.end(setter);
+            }
         }
         lock_btn(ui, &mut ex.locks.grain[eng], ex_changed);
         ui.add_space(12.0);
@@ -2017,6 +2027,10 @@ fn cell_dest(module: Module, inst: u8, idx: u8) -> Option<matrix::ModDest> {
         Module::LoopLfo => lfo().map(|s| ModDest::LoopLfo(inst, s)),
         Module::Grain => {
             let s = match idx {
+                0 => GrainDest::Gate,
+                // The LOOP cell stands in for Loop Position, which has no
+                // control of its own.
+                11 => GrainDest::LoopPosition,
                 1 => GrainDest::Rate,
                 6 => GrainDest::Length,
                 4 => GrainDest::Jitter,
@@ -2071,15 +2085,25 @@ fn cell_learn(
         if started {
             ui.memory_mut(|m| m.data.insert_temp(resp.id, true));
         }
-        if let Some((row, col)) = st.learn.take() {
-            let target = params.cp(Module::Matrix, row, col);
-            set_index(
-                setter,
-                &target,
-                matrix::dest_to_index(dest),
-                matrix::DEST_COUNT,
-            );
-        }
+        assign_pick(setter, params, st, dest);
+    }
+}
+
+/// Assign `dest` to the armed matrix cell and disarm the pick.
+fn assign_pick(
+    setter: &ParamSetter,
+    params: &MangleParams,
+    st: &mut UiState,
+    dest: matrix::ModDest,
+) {
+    if let Some((row, col)) = st.learn.take() {
+        let target = params.cp(Module::Matrix, row, col);
+        set_index(
+            setter,
+            &target,
+            matrix::dest_to_index(dest),
+            matrix::DEST_COUNT,
+        );
     }
 }
 
@@ -3260,6 +3284,58 @@ mod gui_tests {
             PSlot::B(i) => params.bools[i].as_ptr(),
         };
         assert!(!host.begin_log.lock().unwrap().contains(&ptr));
+    }
+
+    /// Arm PICK on row 1 Dest 1, switch to Engines, click `control`, and check
+    /// the assigned destination and that the control's parameter was untouched.
+    fn pick_assigns(control: &str, idx: u8, dest: matrix::GrainDest) {
+        let params = Arc::new(MangleParams::new());
+        let host = TestHost::default();
+        let setter = ParamSetter::new(&host);
+        let ctx = Context::default();
+        let mut st = UiState {
+            tab: Tab::Matrix,
+            ..Default::default()
+        };
+        let mut time = 0.0;
+        labels_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        right_click_label(&ctx, &setter, &params, &mut st, &mut time, "DEST.1");
+        click_label(
+            &ctx,
+            &setter,
+            &params,
+            &mut st,
+            &mut time,
+            "PICK FROM CONTROL",
+        );
+        assert_eq!(st.learn, Some((0, 2)));
+        st.tab = Tab::Engines;
+        labels_frame(&ctx, &setter, &params, &mut st, &mut time, vec![]);
+        click_label(&ctx, &setter, &params, &mut st, &mut time, control);
+
+        assert_eq!(st.learn, None);
+        let want = matrix::dest_to_index(matrix::ModDest::Grain(0, dest));
+        assert_eq!(
+            matrix_index(&host, &params, 2, matrix::DEST_COUNT),
+            Some(want)
+        );
+        let pos = params.table.pos(pid(Module::Grain, 0, idx));
+        let ptr = match params.slots[pos] {
+            PSlot::F(i) => params.floats[i].as_ptr(),
+            PSlot::I(i) => params.ints[i].as_ptr(),
+            PSlot::B(i) => params.bools[i].as_ptr(),
+        };
+        assert!(!host.begin_log.lock().unwrap().contains(&ptr));
+    }
+
+    #[test]
+    fn pick_from_gate_button_assigns_grain_gate() {
+        pick_assigns("GATE", 0, matrix::GrainDest::Gate);
+    }
+
+    #[test]
+    fn pick_from_loop_cell_assigns_loop_position() {
+        pick_assigns("LOOP", 11, matrix::GrainDest::LoopPosition);
     }
 
     #[test]
