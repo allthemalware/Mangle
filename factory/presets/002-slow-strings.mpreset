@@ -1,0 +1,12 @@
+mangle-preset 1
+name Slow Strings
+category Pads
+author Mangle
+slot 0 0509
+p 070000 0.4488
+p 000002 0.6000
+p 020001 0.2884
+p 020004 0.1500
+p 020006 0.6694
+p 020014 0.3333
+p 020013 0.6667
