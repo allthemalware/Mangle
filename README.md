@@ -1,207 +1,73 @@
 # Mangle
 
-[![CI](https://github.com/allthemalware/Mangle/actions/workflows/ci.yml/badge.svg)](https://github.com/allthemalware/Mangle/actions/workflows/ci.yml)
+**Good evening, and welcome.**
 
-A granular texture instrument in **CLAP** plugin form. Load up to six
-samples, sculpt them with three independent grain engines, and modulate
-everything with LFOs, drift, noise, drawable curves and a 32-slot mod
-matrix. Each engine can run in one of four synthesis modes — **Grains,
-Stretch, Cloud, or Spectral** (a phase vocoder) — so it moves between
-Clouds-style clouds, tape-scrub, and spectral freeze. A spiritual port of
-the Torsion Texture Lab, minus the rack.
+This is a sound. A perfectly ordinary sound.
 
-> **Alpha (v0.1.0).** This is a testing build. The DSP core and plugin
-> shell are unit-tested and load in a CLAP host, but several features have
-> not yet been auditioned live in a DAW — see [Known limitations](#known-limitations-what-to-test).
-> Feedback and bug reports are exactly what this build is for.
+Mangle takes it apart.
+
+Mangle is a free plugin for your music software. You give it a recording, and it plays the thing back in tiny pieces, called grains, and lets you decide what becomes of each one. Clouds, drones, frozen moments, shimmering textures, things that were never quite a cello. Marvellous.
+
+> **Alpha release.** Mangle is new and still being tested. It works, but it may have rough edges. If something misbehaves, [tell us](https://github.com/allthemalware/Mangle/issues). That's rather the point of this release.
 
 ---
 
-## What you need
+## What you'll need
 
-- **A CLAP host.** Developed and tested against **Bitwig**; any CLAP-capable
-  host (Bitwig, Reaper 7+, Qtractor, …) should work.
-- **Rust (current stable)** to build the plugin — install via [rustup](https://rustup.rs).
-- **Linux** is the tested platform (developed on Arch). Windows and macOS builds are
-  produced by CI but untested by hand — reports welcome.
+- Music software that supports **CLAP** plugins. Bitwig and Reaper (version 7 or later) both do.
+- Windows, macOS or Linux. Linux is the best tested. Windows and macOS builds are available but have had less attention, so reports are very welcome.
 
-## Install
+## Getting it
 
-**Prebuilt (easiest).** Download the archive for your system from the
-[Releases page](https://github.com/allthemalware/Mangle/releases/latest), unzip it and run
-`install-prebuilt.sh` (Linux, macOS) or `install-prebuilt.ps1` (Windows). Also download
-`mangle-factory-bank.zip` and unzip it into your Mangle data folder to get the full set of
-factory sounds (see `FACTORY.md` for the folder). macOS builds are unsigned: the script clears
-the quarantine flag, or right-click the plugin and choose Open.
+1. Go to the **[latest release](https://github.com/allthemalware/Mangle/releases/latest)**.
+2. Download the file for your computer:
+   - `mangle-windows-x86_64.zip` for Windows
+   - `mangle-macos-arm64.zip` for a Mac with an Apple chip (M1 and newer)
+   - `mangle-macos-x86_64.zip` for an older, Intel Mac
+   - `mangle-linux-x86_64.zip` for Linux
+3. Unzip it and run the installer inside: `install-prebuilt.ps1` on Windows, `install-prebuilt.sh` on Mac and Linux. It puts Mangle where your music software can find it.
+4. Open your music software and rescan your plugins.
 
-**Build from source, one command.** Clone the repo, then:
+**On a Mac?** Mangle isn't signed yet, so macOS may be suspicious of it. The installer deals with this. If it still complains, right-click the plugin and choose Open.
 
-```sh
-bash install.sh                                              # Linux, macOS
-powershell -ExecutionPolicy Bypass -File .\install.ps1       # Windows
-```
+## Your first sound
 
-It asks one question (install here? Y/n), installs Rust if needed, builds, copies the plugin
-into your user CLAP folder and downloads the factory sounds. `--yes` skips the question and
-`--no-factory` skips the 235 MB download. Windows needs the Visual Studio Build Tools (C++ workload).
+1. Add **Mangle** to an instrument track and play a note. You'll hear a simple tone, so you know it's alive.
+2. Click **LOAD** and pick any audio file. Or drag one in.
+3. Play again. That's your sound, in pieces.
+4. Press **⚄ RND** to roll a new patch. If it goes badly, **UNDO RND** puts everything back where it was. Go on. Have a go.
 
-## Build & install manually
+## Sounds to play with
 
-From the repo root:
+The installer already gives you 256 ready-made presets. For the sounds behind them, download **`mangle-factory-bank.zip`** from the same release page. It holds over a thousand sounds: strings, winds, bells, voices, and things being hit, mostly by professionals.
 
-```sh
-cargo xtask bundle mangle --release
-```
+Unzip it and put the `factory` folder inside Mangle's folder, replacing the one that's there:
 
-This produces the plugin bundle at:
+| System | Mangle's folder |
+|--------|-----------------|
+| Windows | `%APPDATA%\mangle` |
+| macOS | `~/Library/Application Support/mangle` |
+| Linux | `~/.local/share/mangle` |
 
-```
-target/bundled/mangle.clap
-```
+Then open the **BROWSER** tab.
 
-Copy or symlink it into your CLAP folder, then rescan plugins in your host:
+## What it does
 
-| OS | CLAP folder |
-|----|-------------|
-| Linux | `~/.clap/` |
-| macOS | `~/Library/Audio/Plug-Ins/CLAP/` |
-| Windows | `%COMMONPROGRAMFILES%\CLAP\` |
+- **Six sample slots.** Bring your own sounds, or use ours.
+- **Three grain engines.** Each reads a sound in its own way: Grains, Stretch, Cloud, or Spectral, for the more adventurous.
+- **Freeze.** In Spectral mode, set TIME to zero and the moment holds. It will wait.
+- **Motion.** Draw a curve, then tell it what to move. Anything can move anything.
+- **Scale lock.** Should the pitches wander, lock them to a scale. Pentatonic is very popular with beginners.
+- **Random, with padlocks.** Keep the parts you like. Roll the rest.
 
-```sh
-# Linux example
-ln -s "$PWD/target/bundled/mangle.clap" ~/.clap/mangle.clap
-```
+## Something wrong?
 
-Bitwig picks it up on the next plugin rescan.
+[Open an issue](https://github.com/allthemalware/Mangle/issues) and tell us which music software you use, what your computer is, and what happened. A short clip of the sound helps enormously.
 
-## First sound (30 seconds)
+## The small print
 
-1. Add **Mangle** to an instrument track and play a note — you'll hear a
-   built-in fallback tone even with no sample loaded, so you know it's alive.
-2. Open the GUI and click a slot's **LOAD** button to load a sample
-   (wav / flac / aiff / ogg / mp3). The waveform appears in the strip.
-3. Play again — the sample now plays with key tracking. Drag the loop edges
-   on the waveform to set the grain window.
-4. Tweak the grain cells on the **ENGINES** tab (RATE, LENGTH, SPRAY, PITCH,
-   SHAPE…) — **G1 / G2 / G3** switch between the three engines — switch
-   **MODE** between Grains / Stretch / Cloud / Spectral, and hit **⚄ RND** to
-   roll a random patch. The other tabs hold the global **MOD** sources, the
-   **MATRIX** (with the master filter), and **CURVES** for drawing your own
-   LFO/envelope shapes.
+Mangle is free software under the **GPLv3** licence. If you'd like to build it yourself or help improve it, see [DEVELOPING.md](DEVELOPING.md).
 
-### Loading samples — other paths
-- **Per-slot LOAD button** (native file picker) — the reliable path, works in
-  every host. Sample loads run on a background thread with per-slot status
-  (`loading`, `missing — LOAD to relink`, `failed`) and a message log in the
-  editor.
-- **Drag & drop** — drag audio files from a file manager or the host's
-  browser onto the editor. Files land in the slot tab under the pointer
-  (or the selected slot), successive slots for multiple files. On Linux/X11
-  this uses a vendored XDND patch (see `vendor/README.md`); Wayland-native
-  hosts are not covered yet.
-- **`MANGLE_SAMPLE=/path/to/file`** environment variable — fills slot 1 on
-  load (handy for quick testing from the terminal).
-- **Presets & embedded samples** — presets remember their sample references,
-  reload them on the background thread without stalling audio, and clear any
-  slots the preset does not reference. A per-preset **EMBED** toggle stores
-  each referenced file's original bytes (base64) in the plugin state —
-  bit-exact, so compressed formats stay compressed — and uses them
-  automatically when a file is missing or changed.
+If you enjoy it, you can [support its making on Ko-fi](https://ko-fi.com/T5F122USRI).
 
-## What's in it
-
-- **6 sample slots**, each with root note, loop points (capped at 100 s; drag
-  ←→ to move, ↑↓ to resize about the centre, or drag edges; Shift-drag /
-  Shift-wheel zooms the per-slot view, saved in state; double-click resets) and
-  gain.
-- **3 grain engines**, each with its own mode (Grains / Stretch / Cloud /
-  Spectral), read/resample algorithm (Nearest / Linear / Hermite / Sinc-8),
-  pitch, spray, jitter, shape/skew envelope, pan, Pos→Pitch tape-drag, and a
-  **pitch-quantize / scale lock** (chromatic, octave, 5th, major, minor,
-  pentatonic).
-- **Modulators:** per-engine Loop LFOs (per-voice), 6 global LFOs (shared
-  across voices, with a one-shot / MSEG mode that reads from Phase to the end
-  of the curve and holds the final point, plus host/note/GUI TRIG), Drift,
-  Noise (control-rate sample-and-hold on a fixed 750 Hz clock independent of
-  block size and note events), Macros, and drawable curves (tabbed single-curve
-  editor with DRAW/LINE tools, step quantize 2–64, phase shift,
-  smooth/invert/mirror, and a 64-shape thumbnail preset bank).
-- **32-slot mod matrix** (`Mod 01`–`Mod 32`) with stereo sources, per-channel
-  routing, grouped right-click Source/Scale/Dest menus, `PICK FROM CONTROL`
-  destination assignment, and Ctrl-click clear.
-- **Master filter** (LP / BP / HP / Notch) with matrix-modulatable cutoff &
-  resonance (~5 ms smoothing, updated per control chunk).
-- **Polyphony, drone mode & MIDI/CLAP:** 16-voice pool plus a dedicated
-  **drone** voice (outside the 16-voice pool) that plays when Global On is
-  active, Key is at 0 %, and no notes are held; playing a note takes over and
-  releasing returns to the drone. Supports per-note tuning, pressure, volume
-  and pan note expressions, MIDI channel pressure, and MIDI **pitch bend**
-  (±2 semitones, channel-aware).
-- **Squeeze** output leveler, stereo width, master level.
-- **RANDOM** with per-section padlocks, Amount/Complexity, a customizable pool
-  editor (grain params, LFO params, sources, scales, destinations — saved with
-  the preset; Mode, Level, Pitch and Quant are excluded from the default grain
-  pool), and TOOLS (`UNDO RND` and `REROLL LAST SEED` for exact recall of the
-  last roll in the session) while keeping held notes playing.
-- **Realtime engine display:** live grain markers and read cursors overlaid
-  on the waveform, plus a scrolling activity lane per engine (grain bursts +
-  level; click a lane to jump to that engine's page).
-
-The full **396**-parameter reference (ranges, defaults, `p{:06x}` host IDs such
-as `p020104`) lives in [`mangle-parameter-map.md`](mangle-parameter-map.md).
-
-## Known limitations — what to test
-
-These landed after the last live-host session and pass automated tests but
-**have not been auditioned in a DAW yet**. Please give them a hard listen and
-report anything off:
-
-- Master **filter** (especially heavy cutoff/resonance modulation from the matrix)
-- **Pitch-quantize / scale lock**
-- **One-shot / MSEG** LFO mode
-- **Note-expression** volume & pan
-- **Spectral** mode (phase vocoder) — freeze, formant shift, blur
-- Sample-accurate note timing at speed
-
-When testing, watch for: clicks/zipper on parameter automation, audible
-glitches when stealing voices under heavy polyphony, CPU spikes, and any
-dropout or crash. Note your host, sample rate and buffer size in reports.
-
-## Reporting issues
-
-Open an issue at **[github.com/allthemalware/Mangle/issues](https://github.com/allthemalware/Mangle/issues)**.
-Include: host + version, OS, sample rate / buffer size, steps to reproduce,
-and (if you can) the patch or a short clip of the artifact.
-
-## For developers
-
-Run the workspace test suite and headless smoketest:
-
-```sh
-cargo test -p mangle-dsp                 # core DSP unit tests (incl. table_has_396_params)
-cargo test --workspace                   # full workspace test suite (DSP, loader, editor & render_block harness)
-bash tools/run-smoketest.sh --release    # drives the built .clap through a headless CLAP host
-```
-
-CI (`.github/workflows/ci.yml`) runs `cargo fmt --all --check`,
-`cargo clippy --all-targets -- -D warnings`, the workspace unit tests
-(including headless editor render tests in `cargo test -p mangle` and the
-scripted-event `render_block` harness in `lib.rs`), and
-`bash tools/run-smoketest.sh --release`.
-
-Architecture, crate breakdown and historical API notes are in
-[`README.old.md`](README.old.md) and [`BUILD_NOTES.md`](BUILD_NOTES.md).
-
-[Support on Ko-fi](https://ko-fi.com/T5F122USRI)
-
-## License note
-
-Mangle is licensed under **GPLv3** (see `LICENSE`). Only the CLAP plugin is
-built; building VST3 would require implementing `Vst3Plugin` and enabling
-nih-plug's `vst3` feature (whose GPLv3 `vst3-sys` binding is compatible with
-this license).
-
-## Factory bank
-`factory/` holds 256 presets (8 categories x 32) and 1,023 source sounds: 499 synthesised (265 stereo) and 524 CC0 recordings from VCSL and VSCO 2 CE (licence and origin per file in `sources.tsv`). Formats are in `FACTORY.md`.
-
-The index and presets are committed; the audio (~235 MB) is not. Rebuild it with `tools/build_factory.sh` (needs cargo, ffmpeg, curl, python3), then `tools/install-factory.sh` copies `factory/` to the plugin's data folder. Open the BROWSER tab to use it. `tools/make_factory_presets.py` regenerates the presets; `tools/curate_recorded.py` regenerates the recording picks.
+*Never leave Mangle unattended with a cello.*
