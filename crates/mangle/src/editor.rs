@@ -455,6 +455,32 @@ fn tbtn_tinted(ui: &mut Ui, label: &str, active: bool, w: f32, flag: bool) -> eg
     resp
 }
 
+/// The RANDOM button: "RND" beside a die face showing five. The die is drawn
+/// rather than typed because the editor's fonts have no die glyph (U+2684).
+fn rnd_btn(ui: &mut Ui, w: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, CELL_H), Sense::click());
+    fill(ui, rect, HEADER);
+    frame(ui, rect, BORDER);
+    let c = if resp.hovered() { BRIGHT } else { TEXT };
+    let mid = rect.center();
+    let at = Pos2::new(mid.x - 3.0, mid.y);
+    txt(ui, at, Align2::LEFT_CENTER, "RND", 10.0, c);
+    let die = Rect::from_center_size(Pos2::new(mid.x - 11.0, mid.y), vec2(9.0, 9.0));
+    let p = ui.painter();
+    p.rect_stroke(die, 1.5, Stroke::new(1.0_f32, c), StrokeKind::Inside);
+    const PIPS: [(f32, f32); 5] = [
+        (-2.2, -2.2),
+        (2.2, -2.2),
+        (0.0, 0.0),
+        (-2.2, 2.2),
+        (2.2, 2.2),
+    ];
+    for (dx, dy) in PIPS {
+        p.circle_filled(die.center() + vec2(dx, dy), 0.9, c);
+    }
+    resp
+}
+
 /// Padlock toggle for the RANDOM lock system.
 fn lock_btn(ui: &mut Ui, locked: &mut bool, changed: &mut bool) {
     let (rect, resp) = ui.allocate_exact_size(vec2(18.0, CELL_H), Sense::click());
@@ -862,7 +888,7 @@ fn header_bar(
                         ui.add_space(12.0);
 
                         // RANDOM die: click = roll, right-click = settings.
-                        let rnd = tbtn(ui, "\u{2684} RND", false, 64.0); // ⚄
+                        let rnd = rnd_btn(ui, 64.0);
                         if rnd.clicked() {
                             let seed = entropy_seed();
                             roll_random(params, setter, ex, ex_changed, seed, None);
@@ -4115,7 +4141,7 @@ mod gui_tests {
         ex.slot_refs[0] = Some(factory_ref(1));
         gui.set_extra(ex);
         let before = snapshot(&gui.params, &gui.extra());
-        gui.click("⚄ RND");
+        gui.click("RND");
         assert_eq!(gui.extra().pre_roll, Some(before.clone()));
         let bytes = mangle_dsp::state::serialize(&gui.extra());
         let mut restored = mangle_dsp::state::deserialize(&bytes).unwrap();
